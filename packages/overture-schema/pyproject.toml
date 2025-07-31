@@ -9,6 +9,8 @@ dependencies = [
     "overture-schema-core",
     "pydantic>=2.0",
     "pyyaml>=6.0.2",
+    "click>=8.0",
+    "rich>=13.0",
 ]
 description = "Complete Overture Maps schema collection with all themes and types"
 dynamic = ["version"]
@@ -42,3 +44,6 @@ path = "src/overture/schema/__about__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/overture"]
+
+[project.scripts]
+overture-schema = "overture.schema.cli:cli"
