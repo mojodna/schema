@@ -93,7 +93,8 @@ function add_mode() {
   modes["$mode"]=yes
 }
 
-schema_file=schema/schema.yaml
+# schema_file=schema/schema.yaml
+schema_file=pydantic-schema.json
 
 function match() {
   if [ "${#patterns}" == 0 ]; then
@@ -161,7 +162,7 @@ function schema() {
 
 function examples() {
   echo "---- VERIFYING examples ----"
-  find examples -type f | sort | while read -r instance_file; do
+  find reference/examples -type f | sort | while read -r instance_file; do
     if ! [[ "$instance_file" == *.yaml ]] && ! [[ "$instance_file" == *.json ]]; then
       printf "%s...FAILED\nexample instance '%s' is EXPECTED to be a .yaml or .json file but ACTUALLY it is not.\n" "$instance_file" "$instance_file"
       return 1
@@ -187,7 +188,7 @@ function counterexamples() {
   else
     >&2 printf "WARNING: yq is not installed. Install yq for higher-fidelity counterexample testing.\n"
   fi
-  find counterexamples -type f | sort | while read -r instance_file; do
+  find reference/counterexamples -type f | sort | while read -r instance_file; do
     if ! match "$instance_file"; then
       continue
     fi
