@@ -47,7 +47,7 @@ The library is designed to support data producer extensions through multiple pat
 
 ### Model Registration System
 
-TODO this is out of date
+TODO this is out of date and needs to reflect the use of setuptools entry points.
 
 The library uses a global model registry that enables modular packages while supporting centralized validation and schema generation:
 
@@ -118,6 +118,66 @@ class ExtendedPlaceCategory(PlaceCategory):
     CRYPTOCURRENCY_ATM = "cryptocurrency_atm"
     DRONE_DELIVERY_HUB = "drone_delivery_hub"
 ```
+
+### Linear Referencing Extensions
+
+TODO this isn't explicitly linear referencing extensions, but it's interesting content
+
+```python
+from overture.schema.transportation.segment import Segment
+from overture.schema.core.base import LinearReferencedEvent
+from pydantic import BaseModel, Field
+from typing import Literal
+from datetime import time
+
+class TimeSpan(BaseModel):
+    """Time-based restriction following CurbLR specification"""
+    days_of_week: list[str] = Field(description="Days when restriction applies")
+    time_of_day_start: time | None = Field(
+        default=None, description="Start time"
+    )
+    time_of_day_end: time | None = Field(default=None, description="End time")
+    designated_period: str | None = Field(
+        default=None,
+        description="Named time period (school_days, snow_emergency)"
+    )
+
+class PaymentTerms(BaseModel):
+    """Payment requirements for curb usage"""
+    rate: float | None = Field(default=None, description="Cost per unit time")
+    rate_unit: str | None = Field(
+        default=None, description="Unit of time for rate (hour, day)"
+    )
+    methods: list[str] = Field(
+        default_factory=list, description="Accepted payment methods"
+    )
+
+class CurbRestriction(LinearReferencedEvent):
+    """Curb usage restrictions following CurbLR specification"""
+    type: Literal["curb_restriction"] = "curb_restriction"
+    rule: str = Field(
+        description="Type of regulation (no_parking, loading_zone, etc.)"
+    )
+    user_classes: list[str] = Field(
+        default_factory=list, description="Vehicle types or user groups"
+    )
+    time_spans: list[TimeSpan] = Field(
+        default_factory=list, description="When restriction applies"
+    )
+    payment: PaymentTerms | None = Field(
+        default=None, description="Payment requirements"
+    )
+    priority: int = Field(
+        default=1, description="Priority for overlapping regulations"
+    )
+    max_stay_minutes: int | None = Field(
+        default=None, description="Maximum stay duration"
+    )
+```
+
+### CLI
+
+TK instructions on using the CLI (which is available in mojodna's pydantic-cli branch)
 
 ### Development Experience
 
