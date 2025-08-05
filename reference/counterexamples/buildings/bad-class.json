@@ -7,7 +7,7 @@
   },
   "properties": {
     "ext_expected_errors": [
-      "/properties/properties/properties/class/enum]: value must be one of"
+      "[S#/$defs/BuildingClass/enum]: value must be one of"
     ],
     "theme": "buildings",
     "type": "building",
