@@ -47,6 +47,7 @@ files = "packages/**/*.py"
 [dependency-groups]
 dev = [
     "docformatter>=1.7.7",
+    "erdantic>=1.1.1",
 ]
 
 [tool.docformatter]
