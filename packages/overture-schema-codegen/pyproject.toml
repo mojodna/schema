@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "overture-schema-codegen"
+dynamic = ["version"]
+description = "Code generation tools for Overture Maps schemas"
+license = "MIT"
+dependencies = [
+    "pydantic>=2.0",
+    "jinja2>=3.0",
+    "overture-schema-core",
+    "overture-schema-validation",
+    "click>=8.0",
+    "rich>=13.0",
+]
+
+[tool.uv.sources]
+overture-schema-core = { workspace = true }
+overture-schema-validation = { workspace = true }
+
+[tool.hatch.version]
+path = "src/overture/schema/codegen/__about__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/overture"]
+
+[project.scripts]
+codegen = "overture.schema.codegen.cli:cli"
+
+[dependency-groups]
+dev = [
+    "pytest-subtests>=0.14.2",
+]
