@@ -16,6 +16,7 @@ from overture.schema.core.types import (
     TrimmedString,
     WikidataId,
 )
+from overture.schema.core.types.abstract.types import Float64, Int32
 from overture.schema.validation.constraints import (
     UniqueItemsConstraint,
 )
@@ -42,10 +43,10 @@ from .enums import (
 )
 
 SpeedValue = NewType(
-    "SpeedValue", Annotated[int, Field(ge=1, le=350, description="Speed value")]
+    "SpeedValue", Annotated[Int32, Field(ge=1, le=350, description="Speed value")]
 )
 
-Width = NewType("Width", Annotated[float, Field(gt=0)])
+Width = NewType("Width", Annotated[Float64, Field(gt=0)])
 
 
 class ConnectorReference(StrictBaseModel):
@@ -175,23 +176,23 @@ class Speed(StrictBaseModel):
 
 
 class IsMoreThanIntegerRelation(StrictBaseModel):
-    is_more_than: int
+    is_more_than: Int32
 
 
 class IsAtLeastIntegerRelation(StrictBaseModel):
-    is_at_least: int
+    is_at_least: Int32
 
 
 class IsEqualToIntegerRelation(StrictBaseModel):
-    is_equal_to: int
+    is_equal_to: Int32
 
 
 class IsAtMostIntegerRelation(StrictBaseModel):
-    is_at_most: int
+    is_at_most: Int32
 
 
 class IsLessThanIntegerRelation(StrictBaseModel):
-    is_less_than: int
+    is_less_than: Int32
 
 
 IntegerRelation = Annotated[
@@ -212,7 +213,7 @@ class LengthValueWithUnit(StrictBaseModel):
     # Required
 
     unit: LengthUnit
-    value: Annotated[float, Field(ge=0)]
+    value: Annotated[Float64, Field(ge=0)]
 
 
 class IsMoreThanLengthRelation(StrictBaseModel):
@@ -253,7 +254,7 @@ class WeightValueWithUnit(StrictBaseModel):
     # Required
 
     unit: WeightUnit
-    value: Annotated[float, Field(ge=0)]
+    value: Annotated[Float64, Field(ge=0)]
 
 
 class IsMoreThanWeightRelation(StrictBaseModel):
@@ -378,7 +379,7 @@ class VehicleScopeRule(StrictBaseModel):
 
     dimension: VehicleDimension
     comparison: VehicleComparison
-    value: Annotated[float, Field(ge=0)]
+    value: Annotated[Float64, Field(ge=0)]
 
     # Optional
 
