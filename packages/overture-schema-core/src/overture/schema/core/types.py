@@ -1,4 +1,7 @@
-from typing import Annotated, NewType
+from typing import TYPE_CHECKING, Annotated, NewType, TypeVar
+
+if TYPE_CHECKING:
+    from typing import Generic
 
 from pydantic import Field
 
@@ -22,16 +25,36 @@ from overture.schema.validation.types import (
 
 from .types.abstract.types import Float64, Int32
 
-Id = NewType(
-    "Id",
-    Annotated[
-        NoWhitespaceString,
-        Field(
-            min_length=1,
-            description="A feature ID. This may be an ID associated with the Global Entity Reference System (GERS) if—and-only-if the feature represents an entity that is part of GERS.",
-        ),
-    ],
-)
+T = TypeVar("T")
+
+if TYPE_CHECKING:
+    # For type checking, Id is generic and can be parameterized
+    class Id(Generic[T]):
+        """Generic Id type that can be parameterized by feature type.
+
+        Examples:
+            # Basic usage (no type parameter needed)
+            basic_id: Id = "abc123"
+
+            # Type-specific usage
+            building_id: Id[Literal["building"]] = "building_123"
+            place_id: Id[Literal["place"]] = "place_456"
+        """
+
+        pass
+else:
+    # At runtime, Id is a NewType for validation
+    Id = NewType(
+        "Id",
+        Annotated[
+            NoWhitespaceString,
+            Field(
+                min_length=1,
+                description="A feature ID. This may be an ID associated with the Global Entity Reference System (GERS) if—and-only-if the feature represents an entity that is part of GERS.",
+            ),
+        ],
+    )
+
 
 # One possible advantage to using percentages over absolute distances is being able to trivially validate that the position lies "on" its segment (i.e. is between zero and one). Of course, this level of validity doesn't mean the number isn't nonsense.
 LinearlyReferencedPosition = NewType(

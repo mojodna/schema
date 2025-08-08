@@ -13,8 +13,216 @@ pip install overture-schema-core
 - **Base Classes**: Extensible base models for Overture Maps features
 - **Geometry Types**: WKB geometry type hints and utilities
 - **Common Structures**: Shared models used across all themes
+- **Generic Id Type**: Type-parameterized feature IDs for enhanced type safety
 - **Abstract Data Types**: Validated primitive types with multi-target serialization support
 - **Scoping System**: Flexible conditional rule application framework
+
+## Generic Id Type
+
+The `Id` type is a generic type that can be optionally parameterized by feature type to provide enhanced type safety and better documentation of what kind of entity an ID refers to.
+
+### Basic Usage
+
+```python
+from overture.schema.core.types import Id
+
+# Basic usage (backward compatible)
+feature_id: Id = Id("abc123")
+
+# Works with any string value that meets validation requirements
+id_value = Id("feature_456")
+```
+
+### Type-Parameterized Usage
+
+For enhanced type safety, you can parameterize `Id` with a specific feature type:
+
+```python
+from typing import Literal
+from overture.schema.core.types import Id
+
+# Type-specific IDs for better type safety
+building_id: Id[Literal["building"]] = "building_123"
+place_id: Id[Literal["place"]] = "place_456"
+connector_id: Id[Literal["connector"]] = "connector_789"
+```
+
+### Integration with Feature Models
+
+When defining feature models, you can use parameterized IDs to document the expected ID type:
+
+```python
+from typing import Literal
+from overture.schema.core import OvertureFeature
+from overture.schema.core.types import Id
+
+class Building(OvertureFeature):
+    id: Id[Literal["building"]]  # Clearly indicates this is a building ID
+    theme: Literal["buildings"]
+    type: Literal["building"]
+    # ... other fields
+```
+
+### Type Safety Benefits
+
+The generic `Id` type provides several advantages:
+
+1. **Enhanced Documentation**: The type parameter serves as documentation about what the ID refers to
+2. **Type Checker Support**: Static type checkers can distinguish between different ID types
+3. **Backward Compatibility**: Existing code using unparameterized `Id` continues to work unchanged
+4. **Runtime Behavior**: All IDs remain strings at runtime with the same validation
+
+### Validation
+
+All `Id` types (parameterized and unparameterized) use the same underlying validation:
+
+- Must be a non-whitespace string
+- Minimum length of 1 character
+- May be associated with the Global Entity Reference System (GERS) if the feature is part of GERS
+
+### Examples in Context
+
+```python
+from typing import Literal
+from overture.schema.core.types import Id
+
+def process_building_id(building_id: Id[Literal["building"]]) -> str:
+    return f"Processing building: {building_id}"
+
+def process_place_id(place_id: Id[Literal["place"]]) -> str:
+    return f"Processing place: {place_id}"
+
+# Type checker can distinguish between these
+building = Id("building_123")
+place = Id("place_456")
+
+# This works fine
+process_building_id(building)
+process_place_id(place)
+
+# Type checker would warn about mixing types if you had:
+# process_building_id(place)  # Type error with parameterized IDs
+```
+
+## Foreign Key Relationships
+
+The generic `Id` type can be extended to create typed foreign key relationships between features. This provides enhanced type safety and enables automatic relationship discovery.
+
+### Creating Foreign Key Types
+
+```python
+from typing import Literal
+from overture.schema.core.types import Id
+from overture.schema.core import ForeignKey, References
+
+# Method 1: Using parameterized Id types
+ConnectorId = Id[Literal["connector"]]
+SegmentId = Id[Literal["segment"]]
+BuildingId = Id[Literal["building"]]
+
+# Method 2: Using the References helper (simpler syntax)
+from overture.schema.core import References
+ConnectorRef = References(Literal["connector"])
+
+# Method 3: Using ForeignKey with explicit source and target
+BuildingPartId = ForeignKey[Literal["building"], Literal["building_part"]]
+```
+
+### Using Foreign Keys in Models
+
+```python
+from typing import Literal, Annotated
+from pydantic import BaseModel, Field
+from overture.schema.core.types import Id
+
+# Define foreign key types
+ConnectorId = Id[Literal["connector"]]
+SegmentId = Id[Literal["segment"]]
+
+class TransportationSegment(BaseModel):
+    """A transportation segment with connector references."""
+
+    id: SegmentId
+    start_connector: ConnectorId
+    end_connector: ConnectorId
+    connected_segments: list[SegmentId] = []
+
+class ConnectorReference(BaseModel):
+    """Reference to a connector at a specific position."""
+
+    connector_id: ConnectorId
+    at_position: Annotated[float, Field(ge=0.0, le=1.0)]
+```
+
+### Automatic Relationship Discovery
+
+You can automatically discover relationships in your models:
+
+```python
+from overture.schema.core import get_relationships_from_model
+
+# Analyze a model to find its foreign key relationships
+relationships = get_relationships_from_model(TransportationSegment)
+
+print("Transportation Segment relationships:")
+for field_name, fk_list in relationships.items():
+    for fk_info in fk_list:
+        print(f"  {field_name}: references {fk_info['target']}")
+
+# Output:
+# Transportation Segment relationships:
+#   start_connector: references typing.Literal['connector']
+#   end_connector: references typing.Literal['connector']
+#   connected_segments: references typing.Literal['segment']
+```
+
+### JSON Schema Integration
+
+Foreign key relationships are automatically included in JSON Schema generation:
+
+```python
+from overture.schema.core.json_schema import json_schema
+
+schema = json_schema(TransportationSegment)
+
+# Foreign key fields include metadata about their relationships
+connector_field = schema["properties"]["start_connector"]
+print(connector_field.get("x-foreign-key"))  # Relationship metadata
+```
+
+### Benefits of Typed Foreign Keys
+
+1. **Type Safety**: Prevents accidentally mixing different ID types
+2. **Self-Documenting**: The type annotations clearly show relationships
+3. **Tooling Support**: IDEs and linters can provide better assistance
+4. **Automatic Discovery**: Relationships can be discovered programmatically
+5. **Schema Generation**: Foreign key constraints can be included in generated schemas
+6. **Database Integration**: Could be used to generate SQL foreign key constraints
+
+### Real-World Example: Transportation Network
+
+```python
+class Connector(BaseModel):
+    id: Id[Literal["connector"]]
+    geometry: Point
+    connected_segments: list[Id[Literal["segment"]]] = []
+
+class Segment(BaseModel):
+    id: Id[Literal["segment"]]
+    geometry: LineString
+    start_connector: Id[Literal["connector"]]
+    end_connector: Id[Literal["connector"]]
+
+class Route(BaseModel):
+    id: Id[Literal["route"]]
+    name: str
+    segments: list[Id[Literal["segment"]]]
+
+# The type system ensures you can't accidentally use a segment ID
+# where a connector ID is expected, and vice versa
+```
+
+This approach enables building strongly-typed, self-documenting data models with explicit relationships while maintaining runtime compatibility with existing code.
 
 ## Abstract Data Types
 

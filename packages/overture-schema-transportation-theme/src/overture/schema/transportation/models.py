@@ -1,10 +1,11 @@
 """Transportation theme models."""
 
-from typing import Annotated, NewType
+from typing import Annotated, Literal, NewType, TypeAlias
 
 from pydantic import ConfigDict, Field
 
 from overture.schema.core import (
+    References,
     StrictBaseModel,
 )
 from overture.schema.core.models import GeometricRangeScope
@@ -48,6 +49,10 @@ SpeedValue = NewType(
 
 Width = NewType("Width", Annotated[Float64, Field(gt=0)])
 
+# Foreign key type aliases - use Id with type parameters
+ConnectorId: TypeAlias = Id[Literal["connector"]]
+SegmentId: TypeAlias = Id[Literal["segment"]]
+
 
 class ConnectorReference(StrictBaseModel):
     """Contains the GERS ID and relative position between 0 and 1 of a connector feature along the segment."""
@@ -56,7 +61,7 @@ class ConnectorReference(StrictBaseModel):
 
     # Required
 
-    connector_id: Id
+    connector_id: ConnectorId
     at: LinearlyReferencedPosition
 
 
@@ -94,19 +99,19 @@ class DestinationRule(StrictBaseModel):
     # Required
 
     from_connector_id: Annotated[
-        Id,
+        ConnectorId,
         Field(
             description="Identifies the point of physical connection on this segment before which the destination sign or marking is visible.",
         ),
     ]
     to_connector_id: Annotated[
-        Id,
+        ConnectorId,
         Field(
             description="Identifies the point of physical connection on the segment identified by 'to_segment_id' to transition to for reaching the destination(s).",
         ),
     ]
     to_segment_id: Annotated[
-        Id,
+        SegmentId,
         Field(
             description="Identifies the segment to transition to reach the destination(s) labeled on the sign or marking.",
         ),
@@ -297,13 +302,13 @@ class SequenceEntry(StrictBaseModel):
     # Required
 
     connector_id: Annotated[
-        Id,
+        ConnectorId,
         Field(
             description="Identifies the point of physical connection between the previous segment in the sequence and the segment in this sequence entry.",
         ),
     ]
     segment_id: Annotated[
-        Id,
+        SegmentId,
         Field(
             description="Identifies the segment that the previous segment in the sequence is physically connected to via the sequence entry's connector.",
         ),
