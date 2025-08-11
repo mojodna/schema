@@ -4,6 +4,8 @@ from typing import Annotated, Any
 from pydantic import Field
 from pydantic.fields import FieldInfo
 
+from overture.schema.core.geometry import Geometry
+
 
 @dataclass(frozen=True)
 class AbstractTypeDefinition:
@@ -94,8 +96,62 @@ class AbstractTypeRegistry:
         "GEOMETRY": AbstractTypeDefinition(
             base=object,  # Generic base for geometry
             target_mappings={
-                "scala": "org.locationtech.jts.geom.Geometry",
-                "spark": "GeometryType",
+                "scala": "Array[Byte]",
+                "scala+sedona": "org.locationtech.jts.geom.Geometry",
+                "spark": "BinaryType",
+                "spark+sedona": "GeometryType",
+                "parquet": "BYTE_ARRAY",  # WKB
+                "json": "custom",  # TODO GeoJSON
+            },
+        ),
+        # Direct type mappings using Python types as keys
+        str: AbstractTypeDefinition(
+            base=str,
+            target_mappings={
+                "scala": "String",
+                "spark": "StringType",
+                "parquet": "BYTE_ARRAY",
+            },
+        ),
+        int: AbstractTypeDefinition(
+            base=int,
+            target_mappings={
+                "scala": "Long",  # Spark prefers Long for basic int
+                "spark": "LongType",
+                "parquet": "INT64",
+            },
+        ),
+        float: AbstractTypeDefinition(
+            base=float,
+            target_mappings={
+                "scala": "Double",
+                "spark": "DoubleType",
+                "parquet": "DOUBLE",
+            },
+        ),
+        bool: AbstractTypeDefinition(
+            base=bool,
+            target_mappings={
+                "scala": "Boolean",
+                "spark": "BooleanType",
+                "parquet": "BOOLEAN",
+            },
+        ),
+        bytes: AbstractTypeDefinition(
+            base=bytes,
+            target_mappings={
+                "scala": "Array[Byte]",
+                "spark": "BinaryType",
+                "parquet": "BYTE_ARRAY",
+            },
+        ),
+        Geometry: AbstractTypeDefinition(
+            base=object,  # Generic base for geometry
+            target_mappings={
+                "scala": "Array[Byte]",
+                "scala+sedona": "org.locationtech.jts.geom.Geometry",
+                "spark": "BinaryType",
+                "spark+sedona": "GeometryType",
                 "parquet": "BYTE_ARRAY",  # WKB
                 "json": "custom",  # TODO GeoJSON
             },
