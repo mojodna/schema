@@ -111,7 +111,9 @@ The validating regular expression for this property follows the pattern describe
 # "updateVersion" field which gives the last Overture version number in which the
 # feature changed. The downside to doing this is that the number would cease to be
 # indicative of the "rate of change" of the feature.
-FeatureVersion = NewType("FeatureVersion", Annotated[int, Field(ge=0, description="")])
+FeatureVersion = NewType(
+    "FeatureVersion", Annotated[Int32, Field(ge=0, description="")]
+)
 
 # A somewhat more compact approach would be to reference the Overture version where the
 # feature last changed instead of the update time, and expect clients to do a lookup if
