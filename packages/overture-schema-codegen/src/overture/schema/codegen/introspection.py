@@ -19,6 +19,7 @@ class FieldInfo:
     is_nullable: bool
     default_value: Any
     description: str | None
+    alias: str | None = None  # Pydantic field alias for serialization/schema
     nested_model: type[BaseModel] | None = None
     is_discriminated_union: bool = False
     discriminator_field: str | None = None
@@ -167,6 +168,7 @@ def extract_fields_recursive(
                 if hasattr(field_info, "default")
                 else None,
                 description=field_info.description,
+                alias=getattr(field_info, "alias", None),
             )
 
             # Check if this field contains a nested Pydantic model

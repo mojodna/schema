@@ -18,6 +18,7 @@ from .plantuml import (
     generate_combined_plantuml_diagram,
     generate_plantuml_class_diagram,
 )
+from .spark_scala import generate_spark_scala_code
 
 
 @click.group()
@@ -75,7 +76,8 @@ def _discover_overture_models() -> list[type[BaseModel] | Any]:
 @click.option(
     "--format",
     type=click.Choice(
-        ["scala", "typescript", "rust", "introspect"], case_sensitive=False
+        ["spark-scala", "scala", "typescript", "rust", "introspect"],
+        case_sensitive=False,
     ),
     default="introspect",
     help="Target language/format for code generation (default: introspect for debugging)",
@@ -182,6 +184,30 @@ def generate(
                                 )
                 except Exception as e:
                     click.echo(f"  Error processing: {e}", err=True)
+        elif format == "spark-scala":
+            try:
+                scala_code = generate_spark_scala_code(model_class, package)
+
+                if output_dir:
+                    import os
+
+                    os.makedirs(output_dir, exist_ok=True)
+                    filename = f"{model_class.__name__}.scala"
+                    if is_union and variants:
+                        # Generate better filename for unions
+                        filename = (
+                            f"{''.join(v.__name__ for v in variants[:2])}Union.scala"
+                        )
+
+                    filepath = os.path.join(output_dir, filename)
+                    with open(filepath, "w") as f:
+                        f.write(scala_code)
+                    click.echo(f"  Generated Scala code written to: {filepath}")
+                else:
+                    click.echo(scala_code)
+            except Exception as e:
+                click.echo(f"  Error generating Spark Scala code: {e}", err=True)
+
         else:
             click.echo(f"  Format '{format}' - not yet implemented")
 
