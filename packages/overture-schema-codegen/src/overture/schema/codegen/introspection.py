@@ -232,6 +232,20 @@ def _extract_nested_model(annotation: Any) -> type[BaseModel] | None:
     if inspect.isclass(annotation) and issubclass(annotation, BaseModel):
         return annotation
 
+    # Handle NewType wrappers
+    if hasattr(annotation, "__supertype__"):
+        underlying_type = annotation.__supertype__
+        return _extract_nested_model(underlying_type)
+
+    # Handle Annotated types
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        args = get_args(annotation)
+        if args:
+            # The first argument is the actual type
+            actual_type = args[0]
+            return _extract_nested_model(actual_type)
+
     # Handle new union syntax (Python 3.10+)
     if isinstance(annotation, types.UnionType):
         for arg in annotation.__args__:
@@ -243,7 +257,6 @@ def _extract_nested_model(annotation: Any) -> type[BaseModel] | None:
                 return arg
 
     # Handle Optional[BaseModel] or Union[BaseModel, None]
-    origin = get_origin(annotation)
     if origin is Union:
         args = get_args(annotation)
         for arg in args:

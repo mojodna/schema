@@ -2,14 +2,12 @@
 
 import importlib
 import inspect
-import sys
 from typing import Any
 
 import click
 from pydantic import BaseModel
 
 from .introspection import (
-    extract_discriminated_union_info,
     extract_fields_recursive,
     get_model_hierarchy,
     is_discriminated_union,
@@ -138,21 +136,21 @@ def generate(
     else:
         raise click.ClickException("Must specify either --model or --discover")
 
-    click.echo(f"Processing {len(models_to_process)} model(s) with format: {format}")
+    click.echo(f"Processing {len(models_to_process)} model(s) with format: {format}", err=True)
 
     # Process each model
     for model_class in models_to_process:
-        # Handle naming for discriminated unions
-        is_union, discriminator, variants = is_discriminated_union(model_class)
-        if is_union and variants and discriminator:
-            name = f"DiscriminatedUnion[{', '.join(v.__name__ for v in variants)}]"
-            click.echo(f"\n=== {name} ===")
-            click.echo(f"  Discriminator field: {discriminator}")
-            click.echo(f"  Variants: {[v.__name__ for v in variants]}")
-        else:
-            click.echo(f"\n=== {model_class.__name__} ===")
-
         if format == "introspect":
+            # Handle naming for discriminated unions
+            is_union, discriminator, variants = is_discriminated_union(model_class)
+            if is_union and variants and discriminator:
+                name = f"DiscriminatedUnion[{', '.join(v.__name__ for v in variants)}]"
+                click.echo(f"\n=== {name} ===")
+                click.echo(f"  Discriminator field: {discriminator}")
+                click.echo(f"  Variants: {[v.__name__ for v in variants]}")
+            else:
+                click.echo(f"\n=== {model_class.__name__} ===")
+
             if hierarchy and not is_union:
                 # Show hierarchical structure (only for regular models)
                 hierarchy_data = get_model_hierarchy(model_class)
@@ -189,16 +187,12 @@ def generate(
                 scala_code = generate_spark_scala_code(model_class, package)
 
                 if output_dir:
+                    # TODO optionally generate file-per class in package-specific
+                    # subdirectories with imports as needed
                     import os
 
                     os.makedirs(output_dir, exist_ok=True)
-                    filename = f"{model_class.__name__}.scala"
-                    if is_union and variants:
-                        # Generate better filename for unions
-                        filename = (
-                            f"{''.join(v.__name__ for v in variants[:2])}Union.scala"
-                        )
-
+                    filename = f"{class_name}.scala"
                     filepath = os.path.join(output_dir, filename)
                     with open(filepath, "w") as f:
                         f.write(scala_code)
