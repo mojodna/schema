@@ -74,7 +74,13 @@ def _discover_overture_models() -> list[type[BaseModel] | Any]:
 @click.option(
     "--format",
     type=click.Choice(
-        ["spark-scala", "scala", "typescript", "rust", "introspect"],
+        [
+            "spark-scala",
+            "scala",
+            "typescript",
+            "rust",
+            "introspect",
+        ],
         case_sensitive=False,
     ),
     default="introspect",
@@ -103,6 +109,11 @@ def _discover_overture_models() -> list[type[BaseModel] | Any]:
     is_flag=True,
     help="Show hierarchical model structure (introspect format only)",
 )
+@click.option(
+    "--with-validation",
+    is_flag=True,
+    help="Generate validation code alongside main code (spark-scala format only)",
+)
 def generate(
     format: str,
     model: str | None,
@@ -110,6 +121,7 @@ def generate(
     package: str | None,
     output_dir: str | None,
     hierarchy: bool,
+    with_validation: bool,
 ) -> None:
     """Generate code from Overture Maps schema models."""
 
@@ -136,7 +148,9 @@ def generate(
     else:
         raise click.ClickException("Must specify either --model or --discover")
 
-    click.echo(f"Processing {len(models_to_process)} model(s) with format: {format}", err=True)
+    click.echo(
+        f"Processing {len(models_to_process)} model(s) with format: {format}", err=True
+    )
 
     # Process each model
     for model_class in models_to_process:
@@ -184,21 +198,41 @@ def generate(
                     click.echo(f"  Error processing: {e}", err=True)
         elif format == "spark-scala":
             try:
-                scala_code = generate_spark_scala_code(model_class, package)
+                # Generate main Scala code
+                scala_code = generate_spark_scala_code(
+                    model_class, package, with_validation
+                )
 
+                # Get model name for file naming
+                is_union, discriminator, variants = is_discriminated_union(model_class)
+                if is_union and variants:
+                    model_name = f"Union_{len(variants)}_variants"
+                else:
+                    model_name = model_class.__name__
+
+                # Validation is now integrated into the main Scala code generation
+
+                # Output handling
                 if output_dir:
-                    # TODO optionally generate file-per class in package-specific
-                    # subdirectories with imports as needed
                     import os
 
                     os.makedirs(output_dir, exist_ok=True)
-                    filename = f"{class_name}.scala"
+
+                    # Write main Scala code
+                    filename = f"{model_name}.scala"
                     filepath = os.path.join(output_dir, filename)
                     with open(filepath, "w") as f:
                         f.write(scala_code)
                     click.echo(f"  Generated Scala code written to: {filepath}")
+
+                    # Validation is now integrated into the main Scala file
                 else:
+                    # Output to stdout
+                    click.echo("=== Main Scala Code ===")
                     click.echo(scala_code)
+
+                    # Validation is now integrated into the main Scala code
+
             except Exception as e:
                 click.echo(f"  Error generating Spark Scala code: {e}", err=True)
 
