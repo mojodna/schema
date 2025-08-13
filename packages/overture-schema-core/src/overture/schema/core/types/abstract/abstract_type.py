@@ -28,6 +28,7 @@ class AbstractTypeRegistry:
                 "scala": "Byte",  # Note: Scala Byte is signed, but closest match
                 "spark": "ByteType",
                 "parquet": "INT32",  # Parquet promotes small ints
+                "documented": "uint8",
             },
         ),
         "UINT16": AbstractTypeDefinition(
@@ -37,6 +38,7 @@ class AbstractTypeRegistry:
                 "scala": "Short",  # Note: Scala Short is signed
                 "spark": "ShortType",
                 "parquet": "INT32",
+                "documented": "uint16",
             },
         ),
         "UINT32": AbstractTypeDefinition(
@@ -46,6 +48,7 @@ class AbstractTypeRegistry:
                 "scala": "Long",  # Use Long for safety since Int is signed
                 "spark": "LongType",
                 "parquet": "INT64",  # Promote to avoid overflow
+                "documented": "uint32",
             },
         ),
         "INT8": AbstractTypeDefinition(
@@ -55,6 +58,7 @@ class AbstractTypeRegistry:
                 "scala": "Byte",
                 "spark": "ByteType",
                 "parquet": "INT32",
+                "documented": "int8",
             },
         ),
         "INT32": AbstractTypeDefinition(
@@ -64,6 +68,7 @@ class AbstractTypeRegistry:
                 "scala": "Int",
                 "spark": "IntegerType",
                 "parquet": "INT32",
+                "documented": "int32",
             },
         ),
         "INT64": AbstractTypeDefinition(
@@ -73,6 +78,7 @@ class AbstractTypeRegistry:
                 "scala": "Long",
                 "spark": "LongType",
                 "parquet": "INT64",
+                "documented": "int64",
             },
         ),
         "FLOAT32": AbstractTypeDefinition(
@@ -81,6 +87,7 @@ class AbstractTypeRegistry:
                 "scala": "Float",
                 "spark": "FloatType",
                 "parquet": "FLOAT",
+                "documented": "float32",
             },
             json_schema_override={"type": "number"},
         ),
@@ -90,6 +97,7 @@ class AbstractTypeRegistry:
                 "scala": "Double",
                 "spark": "DoubleType",
                 "parquet": "DOUBLE",
+                "documented": "float64",
             },
             json_schema_override={"type": "number"},
         ),
@@ -102,6 +110,7 @@ class AbstractTypeRegistry:
                 "spark+sedona": "GeometryType",
                 "parquet": "BYTE_ARRAY",  # WKB
                 "json": "custom",  # TODO GeoJSON
+                "documented": "geometry",
             },
         ),
         # Direct type mappings using Python types as keys
@@ -111,6 +120,7 @@ class AbstractTypeRegistry:
                 "scala": "String",
                 "spark": "StringType",
                 "parquet": "BYTE_ARRAY",
+                "documented": "string",
             },
         ),
         int: AbstractTypeDefinition(
@@ -119,6 +129,7 @@ class AbstractTypeRegistry:
                 "scala": "Long",  # Spark prefers Long for basic int
                 "spark": "LongType",
                 "parquet": "INT64",
+                "documented": "integer",
             },
         ),
         float: AbstractTypeDefinition(
@@ -127,6 +138,7 @@ class AbstractTypeRegistry:
                 "scala": "Double",
                 "spark": "DoubleType",
                 "parquet": "DOUBLE",
+                "documented": "number",
             },
         ),
         bool: AbstractTypeDefinition(
@@ -135,6 +147,7 @@ class AbstractTypeRegistry:
                 "scala": "Boolean",
                 "spark": "BooleanType",
                 "parquet": "BOOLEAN",
+                "documented": "boolean",
             },
         ),
         bytes: AbstractTypeDefinition(
@@ -143,6 +156,7 @@ class AbstractTypeRegistry:
                 "scala": "Array[Byte]",
                 "spark": "BinaryType",
                 "parquet": "BYTE_ARRAY",
+                "documented": "bytes",
             },
         ),
         Geometry: AbstractTypeDefinition(
@@ -154,6 +168,7 @@ class AbstractTypeRegistry:
                 "spark+sedona": "GeometryType",
                 "parquet": "BYTE_ARRAY",  # WKB
                 "json": "custom",  # TODO GeoJSON
+                "documented": "geometry",
             },
         ),
     }

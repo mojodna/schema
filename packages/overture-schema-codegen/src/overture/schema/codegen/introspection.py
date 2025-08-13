@@ -156,7 +156,9 @@ def extract_fields_recursive(
         processed_models.add(model_id)
 
         for field_name, field_info in model.model_fields.items():
-            full_field_name = f"{prefix}{field_name}" if prefix else field_name
+            # Use alias if available, otherwise use field name
+            display_name = getattr(field_info, "alias", None) or field_name
+            full_field_name = f"{prefix}{display_name}" if prefix else display_name
 
             field_data = FieldInfo(
                 name=full_field_name,
@@ -175,10 +177,13 @@ def extract_fields_recursive(
             nested_model = _extract_nested_model(field_info.annotation)
             if nested_model:
                 field_data.nested_model = nested_model
-                # Recursively process the nested model
-                _extract_fields_from_model(nested_model, f"{full_field_name}.")
 
+            # Add the parent field first
             fields.append(field_data)
+
+            # Then immediately process nested fields if any
+            if nested_model:
+                _extract_fields_from_model(nested_model, f"{full_field_name}.")
 
     _extract_fields_from_model(model_class_or_union)
     return fields

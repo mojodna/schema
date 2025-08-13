@@ -12,6 +12,7 @@ from .introspection import (
     get_model_hierarchy,
     is_discriminated_union,
 )
+from .mdx import generate_mdx_documentation
 from .plantuml import (
     generate_combined_plantuml_diagram,
     generate_plantuml_class_diagram,
@@ -58,6 +59,89 @@ def _load_model_class(module_path: str, class_name: str) -> type[BaseModel] | An
         raise click.ClickException(str(e))
 
 
+def _extract_theme_from_model(model_class: type[BaseModel] | Any) -> str | None:
+    """Extract theme name from a Pydantic model or discriminated union."""
+    from typing import get_args, get_origin
+
+    # Handle discriminated unions by checking the first variant
+    is_union, discriminator, variants = is_discriminated_union(model_class)
+    if is_union and variants:
+        # Extract theme from the first variant
+        model_class = variants[0]
+
+    # Look at the model's base classes to find Feature[theme, type]
+    if hasattr(model_class, "__orig_bases__"):
+        for base in model_class.__orig_bases__:
+            origin = get_origin(base)
+            if origin and hasattr(origin, "__name__") and "Feature" in origin.__name__:
+                args = get_args(base)
+                if len(args) >= 1:
+                    # Extract theme from Literal["theme_name"]
+                    theme_arg = args[0]
+                    theme_origin = get_origin(theme_arg)
+                    if (
+                        theme_origin
+                        and hasattr(theme_origin, "__name__")
+                        and "Literal" in str(theme_origin)
+                    ):
+                        theme_args = get_args(theme_arg)
+                        if theme_args:
+                            return str(theme_args[0])
+
+    # Fallback: try to extract from module path
+    if hasattr(model_class, "__module__"):
+        module_parts = model_class.__module__.split(".")
+        for part in module_parts:
+            if part.endswith("-theme") or part in [
+                "transportation",
+                "buildings",
+                "places",
+                "addresses",
+                "base",
+                "divisions",
+            ]:
+                return part.replace("-theme", "")
+
+    return None
+
+
+def _get_union_name(union_type: Any, variants: list[type[BaseModel]]) -> str:
+    """Extract the proper name for a discriminated union."""
+    # Try to get the name from the union type itself
+    if hasattr(union_type, "__name__") and union_type.__name__ != "Annotated":
+        return union_type.__name__
+
+    # Try to extract from Annotated type
+    from typing import get_args
+
+    if hasattr(union_type, "__args__") and get_args(union_type):
+        first_arg = get_args(union_type)[0]
+        if hasattr(first_arg, "__name__"):
+            return first_arg.__name__
+        else:
+            # Check if it's a Union and try to extract a reasonable name
+            from typing import get_origin
+
+            if get_origin(first_arg):
+                # Look for common patterns like "Segment" for transportation segments
+                variant_names = [v.__name__ for v in variants]
+                # Try to find a common base name by removing common suffixes
+                base_names = set()
+                for name in variant_names:
+                    if name.endswith("Segment"):
+                        base_names.add("Segment")
+                    elif name.endswith("Feature"):
+                        base_names.add("Feature")
+                    elif name.endswith("Model"):
+                        base_names.add("Model")
+
+                if base_names:
+                    return base_names.pop()
+
+    # Final fallback - use generic name
+    return f"Union_{len(variants)}_variants"
+
+
 def _discover_overture_models() -> list[type[BaseModel] | Any]:
     """Discover all Overture schema models from the workspace."""
     try:
@@ -80,6 +164,7 @@ def _discover_overture_models() -> list[type[BaseModel] | Any]:
             "typescript",
             "rust",
             "introspect",
+            "mdx",
         ],
         case_sensitive=False,
     ),
@@ -206,7 +291,7 @@ def generate(
                 # Get model name for file naming
                 is_union, discriminator, variants = is_discriminated_union(model_class)
                 if is_union and variants:
-                    model_name = f"Union_{len(variants)}_variants"
+                    model_name = _get_union_name(model_class, variants)
                 else:
                     model_name = model_class.__name__
 
@@ -216,11 +301,19 @@ def generate(
                 if output_dir:
                     import os
 
-                    os.makedirs(output_dir, exist_ok=True)
+                    # Create theme-based directory structure
+                    theme = _extract_theme_from_model(model_class)
+                    if theme:
+                        theme_dir = os.path.join(output_dir, theme)
+                        os.makedirs(theme_dir, exist_ok=True)
+                        output_path = theme_dir
+                    else:
+                        os.makedirs(output_dir, exist_ok=True)
+                        output_path = output_dir
 
                     # Write main Scala code
                     filename = f"{model_name}.scala"
-                    filepath = os.path.join(output_dir, filename)
+                    filepath = os.path.join(output_path, filename)
                     with open(filepath, "w") as f:
                         f.write(scala_code)
                     click.echo(f"  Generated Scala code written to: {filepath}")
@@ -235,6 +328,49 @@ def generate(
 
             except Exception as e:
                 click.echo(f"  Error generating Spark Scala code: {e}", err=True)
+
+        elif format == "mdx":
+            try:
+                # Generate MDX documentation
+                mdx_content = generate_mdx_documentation(
+                    model_class,
+                    include_hierarchy=hierarchy,
+                    include_field_descriptions=True,
+                )
+
+                # Get model name for file naming
+                is_union, discriminator, variants = is_discriminated_union(model_class)
+                if is_union and variants:
+                    model_name = _get_union_name(model_class, variants)
+                else:
+                    model_name = model_class.__name__
+
+                # Output handling
+                if output_dir:
+                    import os
+
+                    # Create theme-based directory structure
+                    theme = _extract_theme_from_model(model_class)
+                    if theme:
+                        theme_dir = os.path.join(output_dir, theme)
+                        os.makedirs(theme_dir, exist_ok=True)
+                        output_path = theme_dir
+                    else:
+                        os.makedirs(output_dir, exist_ok=True)
+                        output_path = output_dir
+
+                    # Write MDX documentation
+                    filename = f"{model_name}.mdx"
+                    filepath = os.path.join(output_path, filename)
+                    with open(filepath, "w") as f:
+                        f.write(mdx_content)
+                    click.echo(f"  Generated MDX documentation written to: {filepath}")
+                else:
+                    # Output to stdout
+                    click.echo(mdx_content)
+
+            except Exception as e:
+                click.echo(f"  Error generating MDX documentation: {e}", err=True)
 
         else:
             click.echo(f"  Format '{format}' - not yet implemented")

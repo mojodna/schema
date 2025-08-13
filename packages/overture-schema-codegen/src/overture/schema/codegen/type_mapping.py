@@ -296,3 +296,195 @@ def is_direct_base_model(annotation: Any) -> bool:
 
     # Check if it's directly a BaseModel class
     return inspect.isclass(annotation) and issubclass(annotation, BaseModel)
+
+
+def _map_python_type_to_documented_without_backticks(
+    python_type: type, is_nullable: bool = False, field_name: str = ""
+) -> str:
+    """Map Python types to human-readable documented types without backticks."""
+    # This is a helper function that doesn't add backticks around types
+    # Used for inner types within Array[] or Record<> syntax
+
+    # FIRST: Try to get target type from abstract type system before doing anything else
+    documented_type = get_target_type(python_type, "documented")
+    if documented_type:
+        return f"{documented_type} (optional)" if is_nullable else documented_type
+
+    # Handle NewType by checking the underlying type first
+    if hasattr(python_type, "__supertype__"):
+        underlying_type = python_type.__supertype__
+        return _map_python_type_to_documented_without_backticks(
+            underlying_type, is_nullable, field_name
+        )
+
+    # Handle Annotated types
+    origin = get_origin(python_type)
+    if origin is Annotated:
+        args = get_args(python_type)
+        if args:
+            # The first argument is the actual type
+            actual_type = args[0]
+            return _map_python_type_to_documented_without_backticks(
+                actual_type, is_nullable, field_name
+            )
+
+    # Handle Optional types (both Union[T, None] and T | None syntax)
+    import types
+
+    # Handle new union syntax (Python 3.10+) and traditional Union
+    if origin is Union or isinstance(python_type, types.UnionType):
+        if isinstance(python_type, types.UnionType):
+            args = python_type.__args__
+        else:
+            args = get_args(python_type)
+
+        # Check for Optional pattern (Union[T, None] or T | None)
+        if len(args) == 2 and type(None) in args:
+            non_none_type = args[0] if args[1] is type(None) else args[1]
+            # Recursively handle the non-None type
+            base_type = _map_python_type_to_documented_without_backticks(
+                non_none_type, False, field_name
+            )
+            return f"{base_type} (optional)" if not is_nullable else base_type
+
+        # For other unions, show all variants
+        variant_types = [
+            _map_python_type_to_documented_without_backticks(arg, False, "")
+            for arg in args
+            if arg is not type(None)
+        ]
+        return " | ".join(variant_types)
+
+    # Check if this is a BaseModel (nested structure)
+    if inspect.isclass(python_type) and issubclass(python_type, BaseModel):
+        base_type = f"[`{python_type.__name__}`](TK)"
+        return f"{base_type} (optional)" if is_nullable else base_type
+
+    # Check if this is an enum
+    try:
+        import enum
+
+        if inspect.isclass(python_type) and issubclass(python_type, enum.Enum):
+            base_type = f"[`{python_type.__name__}`](TK)"
+            return f"{base_type} (optional)" if is_nullable else base_type
+    except (ImportError, TypeError):
+        pass
+
+    # Ultimate fallback - use the class name or string representation (no backticks)
+    if hasattr(python_type, "__name__"):
+        base_type = python_type.__name__
+    else:
+        base_type = str(python_type)
+
+    return f"{base_type} (optional)" if is_nullable else base_type
+
+
+def map_python_type_to_documented(
+    python_type: type, is_nullable: bool = False, field_name: str = ""
+) -> str:
+    """Map Python types to human-readable documented types."""
+    # Handle arrays/lists in field paths - not part of this function
+    # This function maps individual Python types to documented type names
+
+    # FIRST: Try to get target type from abstract type system before doing anything else
+    documented_type = get_target_type(python_type, "documented")
+    if documented_type:
+        return (
+            f"`{documented_type}` (optional)" if is_nullable else f"`{documented_type}`"
+        )
+
+    # Handle NewType by checking the underlying type first
+    if hasattr(python_type, "__supertype__"):
+        underlying_type = python_type.__supertype__
+        return map_python_type_to_documented(underlying_type, is_nullable, field_name)
+
+    # Handle Annotated types
+    origin = get_origin(python_type)
+    if origin is Annotated:
+        args = get_args(python_type)
+        if args:
+            # The first argument is the actual type
+            actual_type = args[0]
+            return map_python_type_to_documented(actual_type, is_nullable, field_name)
+
+    # Handle Optional types (both Union[T, None] and T | None syntax)
+    import types
+
+    # Handle new union syntax (Python 3.10+) and traditional Union
+    if origin is Union or isinstance(python_type, types.UnionType):
+        if isinstance(python_type, types.UnionType):
+            args = python_type.__args__
+        else:
+            args = get_args(python_type)
+
+        # Check for Optional pattern (Union[T, None] or T | None)
+        if len(args) == 2 and type(None) in args:
+            non_none_type = args[0] if args[1] is type(None) else args[1]
+            # Recursively handle the non-None type
+            base_type = map_python_type_to_documented(non_none_type, False, field_name)
+            return f"{base_type} (optional)" if not is_nullable else base_type
+
+        # For other unions, show all variants
+        variant_types = [
+            map_python_type_to_documented(arg, False, "")
+            for arg in args
+            if arg is not type(None)
+        ]
+        return " | ".join(variant_types)
+
+    # Handle collections
+    if origin is list:
+        args = get_args(python_type)
+        inner_type = args[0] if args else str
+        inner_documented = _map_python_type_to_documented_without_backticks(
+            inner_type, False, ""
+        )
+        # Check if inner type contains links (starts with [`)
+        if inner_documented.startswith("[`"):
+            # Format as `list<`[`Type`](TK)`>` to allow links to render properly
+            base_type = f"`list<`{inner_documented}`>`"
+        else:
+            # Regular formatting with backticks around the whole thing
+            base_type = f"`list<{inner_documented}>`"
+        return f"{base_type} (optional)" if is_nullable else base_type
+    elif origin is dict:
+        args = get_args(python_type)
+        if len(args) >= 2:
+            key_type = _map_python_type_to_documented_without_backticks(
+                args[0], False, ""
+            )
+            value_type = _map_python_type_to_documented_without_backticks(
+                args[1], False, ""
+            )
+            # For string-to-string mappings, use simple "Object"
+            if key_type.lower() == "string" and value_type.lower() == "string":
+                base_type = "`object`"
+            else:
+                base_type = f"`record<{key_type}, {value_type}>`"
+        else:
+            base_type = "`object`"  # Default fallback for string-to-string
+        return f"{base_type} (optional)" if is_nullable else base_type
+
+    # Check if this is a BaseModel (nested structure)
+    if inspect.isclass(python_type) and issubclass(python_type, BaseModel):
+        base_type = f"[`{python_type.__name__}`](TK)"
+        return f"{base_type} (optional)" if is_nullable else base_type
+
+    # Check if this is an enum
+    try:
+        import enum
+
+        if inspect.isclass(python_type) and issubclass(python_type, enum.Enum):
+            base_type = f"[`{python_type.__name__}`](TK)"
+
+            return f"{base_type} (optional)" if is_nullable else base_type
+    except (ImportError, TypeError):
+        pass
+
+    # Ultimate fallback - use the class name or string representation
+    if hasattr(python_type, "__name__"):
+        base_type = f"`{python_type.__name__}`"
+    else:
+        base_type = f"`{str(python_type)}`"
+
+    return f"{base_type} (optional)" if is_nullable else base_type
