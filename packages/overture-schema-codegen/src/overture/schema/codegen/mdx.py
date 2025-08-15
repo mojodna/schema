@@ -1,5 +1,6 @@
 """MDX documentation generation from Pydantic models."""
 
+import enum
 import inspect
 from typing import Any
 
@@ -447,3 +448,41 @@ def _format_hierarchy_as_mdx(
 
     _format_hierarchy_recursive(hierarchy)
     return content
+
+
+def generate_enum_mdx_documentation(enum_class: type[enum.Enum]) -> str:
+    """Generate MDX documentation for an Enum class.
+
+    Args:
+        enum_class: The Enum class to document
+
+    Returns:
+        MDX formatted documentation string
+    """
+    if not (inspect.isclass(enum_class) and issubclass(enum_class, enum.Enum)):
+        raise ValueError(f"Expected an Enum class, got {enum_class}")
+
+    mdx_content = []
+
+    # Title
+    mdx_content.append(f"# {enum_class.__name__}")
+    mdx_content.append("")
+
+    # Enum description from docstring
+    docstring = inspect.getdoc(enum_class)
+    if docstring:
+        mdx_content.append(docstring)
+        mdx_content.append("")
+
+    # Values section
+    mdx_content.append("## Values")
+    mdx_content.append("")
+
+    # Create simple list of values
+    for enum_member in enum_class:
+        value = enum_member.value
+        # Add each value as a code block
+        mdx_content.append(f"- `{value}`")
+
+    mdx_content.append("")
+    return "\n".join(mdx_content)

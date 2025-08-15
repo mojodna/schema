@@ -8,11 +8,13 @@ import click
 from pydantic import BaseModel
 
 from .introspection import (
+    collect_all_basemodel_types,
+    collect_all_enum_types,
     extract_fields_recursive,
     get_model_hierarchy,
     is_discriminated_union,
 )
-from .mdx import generate_mdx_documentation
+from .mdx import generate_enum_mdx_documentation, generate_mdx_documentation
 from .plantuml import (
     generate_combined_plantuml_diagram,
     generate_plantuml_class_diagram,
@@ -237,7 +239,43 @@ def generate(
         f"Processing {len(models_to_process)} model(s) with format: {format}", err=True
     )
 
-    # Process each model
+    # For MDX format, collect all types from all models first
+    if format == "mdx":
+        all_collected_types = set()
+        all_collected_enums = set()
+
+        for model_class in models_to_process:
+            types_from_model = collect_all_basemodel_types(model_class)
+            all_collected_types.update(types_from_model)
+
+            enums_from_model = collect_all_enum_types(model_class)
+            all_collected_enums.update(enums_from_model)
+
+        click.echo(
+            f"Generating MDX for {len(all_collected_types)} unique BaseModel types and {len(all_collected_enums)} unique Enum types",
+            err=True,
+        )
+
+        # Generate MDX for each unique BaseModel type found
+        for found_model in sorted(all_collected_types, key=lambda m: m.__name__):
+            try:
+                _generate_single_mdx_file(found_model, output_dir, hierarchy, click)
+            except Exception as e:
+                click.echo(
+                    f"  Error generating MDX for {found_model.__name__}: {e}", err=True
+                )
+
+        # Generate MDX for each unique Enum type found
+        for found_enum in sorted(all_collected_enums, key=lambda e: e.__name__):
+            try:
+                _generate_single_enum_mdx_file(found_enum, output_dir, click)
+            except Exception as e:
+                click.echo(
+                    f"  Error generating MDX for {found_enum.__name__}: {e}", err=True
+                )
+        return
+
+    # Process each model (original behavior for non-MDX)
     for model_class in models_to_process:
         if format == "introspect":
             # Handle naming for discriminated unions
@@ -328,49 +366,6 @@ def generate(
 
             except Exception as e:
                 click.echo(f"  Error generating Spark Scala code: {e}", err=True)
-
-        elif format == "mdx":
-            try:
-                # Generate MDX documentation
-                mdx_content = generate_mdx_documentation(
-                    model_class,
-                    include_hierarchy=hierarchy,
-                    include_field_descriptions=True,
-                )
-
-                # Get model name for file naming
-                is_union, discriminator, variants = is_discriminated_union(model_class)
-                if is_union and variants:
-                    model_name = _get_union_name(model_class, variants)
-                else:
-                    model_name = model_class.__name__
-
-                # Output handling
-                if output_dir:
-                    import os
-
-                    # Create theme-based directory structure
-                    theme = _extract_theme_from_model(model_class)
-                    if theme:
-                        theme_dir = os.path.join(output_dir, theme)
-                        os.makedirs(theme_dir, exist_ok=True)
-                        output_path = theme_dir
-                    else:
-                        os.makedirs(output_dir, exist_ok=True)
-                        output_path = output_dir
-
-                    # Write MDX documentation
-                    filename = f"{model_name}.mdx"
-                    filepath = os.path.join(output_path, filename)
-                    with open(filepath, "w") as f:
-                        f.write(mdx_content)
-                    click.echo(f"  Generated MDX documentation written to: {filepath}")
-                else:
-                    # Output to stdout
-                    click.echo(mdx_content)
-
-            except Exception as e:
-                click.echo(f"  Error generating MDX documentation: {e}", err=True)
 
         else:
             click.echo(f"  Format '{format}' - not yet implemented")
@@ -482,6 +477,83 @@ def diagram(
         click.echo(f"Diagram written to {output}", err=True)
     else:
         click.echo(final_output)
+
+
+def _generate_single_mdx_file(
+    model_class: type[BaseModel] | Any,
+    output_dir: str | None,
+    hierarchy: bool,
+    click_module: Any,
+) -> None:
+    """Generate MDX documentation for a single model."""
+    # Generate MDX documentation
+    mdx_content = generate_mdx_documentation(
+        model_class,
+        include_hierarchy=hierarchy,
+        include_field_descriptions=True,
+    )
+
+    # Get model name for file naming
+    is_union, discriminator, variants = is_discriminated_union(model_class)
+    if is_union and variants:
+        model_name = _get_union_name(model_class, variants)
+    else:
+        model_name = model_class.__name__
+
+    # Output handling
+    if output_dir:
+        import os
+
+        # Create theme-based directory structure
+        theme = _extract_theme_from_model(model_class)
+        if theme:
+            theme_dir = os.path.join(output_dir, theme)
+            os.makedirs(theme_dir, exist_ok=True)
+            output_path = theme_dir
+        else:
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = output_dir
+
+        # Write MDX documentation
+        filename = f"{model_name}.mdx"
+        filepath = os.path.join(output_path, filename)
+        with open(filepath, "w") as f:
+            f.write(mdx_content)
+        click_module.echo(f"  Generated MDX documentation written to: {filepath}")
+    else:
+        # Output to stdout
+        click_module.echo(mdx_content)
+
+
+def _generate_single_enum_mdx_file(
+    enum_class: type[Any],
+    output_dir: str | None,
+    click_module: Any,
+) -> None:
+    """Generate MDX documentation for a single enum."""
+    # Generate MDX documentation
+    mdx_content = generate_enum_mdx_documentation(enum_class)
+
+    # Get enum name for file naming
+    enum_name = enum_class.__name__
+
+    # Output handling
+    if output_dir:
+        import os
+
+        # Create enums subdirectory
+        enums_dir = os.path.join(output_dir, "enums")
+        os.makedirs(enums_dir, exist_ok=True)
+
+        # Write MDX documentation
+        filename = f"{enum_name}.mdx"
+        filepath = os.path.join(enums_dir, filename)
+        with open(filepath, "w") as f:
+            f.write(mdx_content)
+        click_module.echo(f"  Generated enum MDX documentation written to: {filepath}")
+    else:
+        # Output to stdout
+        click_module.echo(mdx_content)
 
 
 def _print_hierarchy(hierarchy: dict[str, Any], indent: int = 0) -> None:

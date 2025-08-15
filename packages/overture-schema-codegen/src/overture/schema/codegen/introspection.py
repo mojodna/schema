@@ -1,5 +1,6 @@
 """Pydantic model introspection utilities for code generation."""
 
+import enum
 import inspect
 import types
 from dataclasses import dataclass
@@ -318,3 +319,192 @@ def get_model_hierarchy(model_class: type[BaseModel]) -> dict[str, Any]:
         return hierarchy
 
     return _build_hierarchy(model_class)
+
+
+def collect_all_basemodel_types(
+    model_class_or_union: type[BaseModel] | Any,
+) -> set[type[BaseModel]]:
+    """Collect all BaseModel types encountered during traversal of a model or union.
+
+    Args:
+        model_class_or_union: Either a Pydantic BaseModel class or a discriminated union
+
+    Returns:
+        Set of unique BaseModel types found during traversal
+
+    TODO: Also collect and serialize enums, type aliases, and NewType definitions
+    encountered during traversal to provide complete MDX documentation for all
+    referenced types. This would require extending the collection logic and
+    creating serialization methods for these type constructs.
+    """
+    collected_types = set()
+
+    def _collect_from_model(model: type[BaseModel]) -> None:
+        """Recursively collect BaseModel types from a model."""
+        if not (inspect.isclass(model) and issubclass(model, BaseModel)):
+            return
+
+        # Add the model itself
+        collected_types.add(model)
+
+        # Process all fields to find nested models
+        for field_name, field_info in model.model_fields.items():
+            nested_models = _extract_all_nested_models(field_info.annotation)
+            for nested_model in nested_models:
+                if nested_model not in collected_types:
+                    _collect_from_model(nested_model)
+
+    # Check if it's a discriminated union first
+    is_union, discriminator, variants = is_discriminated_union(model_class_or_union)
+
+    if is_union and variants:
+        # For unions, collect from all variants
+        for variant in variants:
+            _collect_from_model(variant)
+    else:
+        # For regular models
+        _collect_from_model(model_class_or_union)
+
+    return collected_types
+
+
+def collect_all_enum_types(
+    model_class_or_union: type[BaseModel] | Any,
+) -> set[type[enum.Enum]]:
+    """Collect all Enum types encountered during traversal of a model or union.
+
+    Args:
+        model_class_or_union: Either a Pydantic BaseModel class or a discriminated union
+
+    Returns:
+        Set of unique Enum types found during traversal
+    """
+    collected_enums = set()
+
+    def _collect_enums_from_model(model: type[BaseModel]) -> None:
+        """Recursively collect Enum types from a model."""
+        if not (inspect.isclass(model) and issubclass(model, BaseModel)):
+            return
+
+        # Process all fields to find enums
+        for field_name, field_info in model.model_fields.items():
+            enums_in_field = _extract_all_enums(field_info.annotation)
+            collected_enums.update(enums_in_field)
+
+            # Also collect from nested BaseModels
+            nested_models = _extract_all_nested_models(field_info.annotation)
+            for nested_model in nested_models:
+                _collect_enums_from_model(nested_model)
+
+    # Check if it's a discriminated union first
+    is_union, discriminator, variants = is_discriminated_union(model_class_or_union)
+
+    if is_union and variants:
+        # For unions, collect from all variants
+        for variant in variants:
+            _collect_enums_from_model(variant)
+    else:
+        # For regular models
+        _collect_enums_from_model(model_class_or_union)
+
+    return collected_enums
+
+
+def _extract_all_enums(annotation: Any) -> list[type[enum.Enum]]:
+    """Extract all Enum types from a type annotation."""
+    enums = []
+
+    # Handle direct Enum reference
+    if inspect.isclass(annotation) and issubclass(annotation, enum.Enum):
+        enums.append(annotation)
+        return enums
+
+    # Handle NewType wrappers
+    if hasattr(annotation, "__supertype__"):
+        underlying_type = annotation.__supertype__
+        enums.extend(_extract_all_enums(underlying_type))
+        return enums
+
+    # Handle Annotated types
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        args = get_args(annotation)
+        if args:
+            # The first argument is the actual type
+            actual_type = args[0]
+            enums.extend(_extract_all_enums(actual_type))
+            return enums
+
+    # Handle new union syntax (Python 3.10+)
+    if isinstance(annotation, types.UnionType):
+        for arg in annotation.__args__:
+            if arg is not type(None):
+                enums.extend(_extract_all_enums(arg))
+        return enums
+
+    # Handle Union types
+    if origin is Union:
+        args = get_args(annotation)
+        for arg in args:
+            if arg is not type(None):
+                enums.extend(_extract_all_enums(arg))
+        return enums
+
+    # Handle generic types like List[Enum], Dict[str, Enum], etc.
+    if origin is not None:
+        args = get_args(annotation)
+        for arg in args:
+            enums.extend(_extract_all_enums(arg))
+        return enums
+
+    return enums
+
+
+def _extract_all_nested_models(annotation: Any) -> list[type[BaseModel]]:
+    """Extract all nested Pydantic models from a type annotation."""
+    models = []
+
+    # Handle direct BaseModel reference
+    if inspect.isclass(annotation) and issubclass(annotation, BaseModel):
+        models.append(annotation)
+        return models
+
+    # Handle NewType wrappers
+    if hasattr(annotation, "__supertype__"):
+        underlying_type = annotation.__supertype__
+        models.extend(_extract_all_nested_models(underlying_type))
+        return models
+
+    # Handle Annotated types
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        args = get_args(annotation)
+        if args:
+            # The first argument is the actual type
+            actual_type = args[0]
+            models.extend(_extract_all_nested_models(actual_type))
+            return models
+
+    # Handle new union syntax (Python 3.10+)
+    if isinstance(annotation, types.UnionType):
+        for arg in annotation.__args__:
+            if arg is not type(None):
+                models.extend(_extract_all_nested_models(arg))
+        return models
+
+    # Handle Union types
+    if origin is Union:
+        args = get_args(annotation)
+        for arg in args:
+            if arg is not type(None):
+                models.extend(_extract_all_nested_models(arg))
+        return models
+
+    # Handle generic types like List[BaseModel], Dict[str, BaseModel], etc.
+    if origin is not None:
+        args = get_args(annotation)
+        for arg in args:
+            models.extend(_extract_all_nested_models(arg))
+        return models
+
+    return models
