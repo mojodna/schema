@@ -283,6 +283,37 @@ def is_nullable_annotation(annotation: Any) -> bool:
     return False
 
 
+def get_enum_examples(enum_class: type, max_examples: int = 3) -> list[str]:
+    """Extract the first N enum values as examples.
+
+    Args:
+        enum_class: The enum class to extract values from
+        max_examples: Maximum number of examples to return (default: 3)
+
+    Returns:
+        List of enum values as strings
+    """
+    try:
+        import enum
+
+        if not (inspect.isclass(enum_class) and issubclass(enum_class, enum.Enum)):
+            return []
+
+        # Get all enum values
+        enum_values = []
+        for member in enum_class:
+            if hasattr(member, "value"):
+                enum_values.append(str(member.value))
+            else:
+                enum_values.append(str(member))
+
+        # Return first max_examples values
+        return enum_values[:max_examples]
+
+    except (ImportError, TypeError, AttributeError):
+        return []
+
+
 def is_direct_base_model(annotation: Any) -> bool:
     """Check if the annotation is directly a BaseModel (not nested in collections)."""
     # Handle Annotated types
@@ -357,7 +388,7 @@ def _map_python_type_to_documented_without_backticks(
 
     # Check if this is a BaseModel (nested structure)
     if inspect.isclass(python_type) and issubclass(python_type, BaseModel):
-        base_type = f"[`{python_type.__name__}`](TK)"
+        base_type = f"object (`[{python_type.__name__}](TK)`)"
         return f"{base_type} (optional)" if is_nullable else base_type
 
     # Check if this is an enum
@@ -365,7 +396,11 @@ def _map_python_type_to_documented_without_backticks(
         import enum
 
         if inspect.isclass(python_type) and issubclass(python_type, enum.Enum):
-            base_type = f"[`{python_type.__name__}`](TK)"
+            # Check if it's a string enum (inherits from str, Enum)
+            if issubclass(python_type, str):
+                base_type = f"string ([{python_type.__name__}](TK))"
+            else:
+                base_type = f"[{python_type.__name__}](TK)"
             return f"{base_type} (optional)" if is_nullable else base_type
     except (ImportError, TypeError):
         pass
@@ -439,10 +474,10 @@ def map_python_type_to_documented(
         inner_documented = _map_python_type_to_documented_without_backticks(
             inner_type, False, ""
         )
-        # Check if inner type contains links (starts with [`)
-        if inner_documented.startswith("[`"):
-            # Format as `list<`[`Type`](TK)`>` to allow links to render properly
-            base_type = f"`list<`{inner_documented}`>`"
+        # Check if inner type contains links (contains markdown links)
+        if "](" in inner_documented:
+            # Format as `list<`inner_type`>` to allow links to render properly
+            base_type = f"`list<{inner_documented}>`"
         else:
             # Regular formatting with backticks around the whole thing
             base_type = f"`list<{inner_documented}>`"
@@ -467,7 +502,7 @@ def map_python_type_to_documented(
 
     # Check if this is a BaseModel (nested structure)
     if inspect.isclass(python_type) and issubclass(python_type, BaseModel):
-        base_type = f"[`{python_type.__name__}`](TK)"
+        base_type = f"`object` (`[{python_type.__name__}](TK)`)"
         return f"{base_type} (optional)" if is_nullable else base_type
 
     # Check if this is an enum
@@ -475,7 +510,11 @@ def map_python_type_to_documented(
         import enum
 
         if inspect.isclass(python_type) and issubclass(python_type, enum.Enum):
-            base_type = f"[`{python_type.__name__}`](TK)"
+            # Check if it's a string enum (inherits from str, Enum)
+            if issubclass(python_type, str):
+                base_type = f"`string` ([{python_type.__name__}](TK))"
+            else:
+                base_type = f"[{python_type.__name__}](TK)"
 
             return f"{base_type} (optional)" if is_nullable else base_type
     except (ImportError, TypeError):

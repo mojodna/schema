@@ -11,7 +11,7 @@ from .introspection import (
     get_model_hierarchy,
     is_discriminated_union,
 )
-from .type_mapping import map_python_type_to_documented
+from .type_mapping import get_enum_examples, map_python_type_to_documented
 
 
 def generate_mdx_documentation(
@@ -323,6 +323,27 @@ def _format_fields_as_mdx(
             )
 
             description = field.description or ""
+
+            # Add enum examples for string enums
+            try:
+                import enum
+
+                if (
+                    inspect.isclass(field.python_type)
+                    and issubclass(field.python_type, enum.Enum)
+                    and issubclass(field.python_type, str)
+                ):
+                    enum_examples = get_enum_examples(field.python_type, 3)
+                    if enum_examples:
+                        if description and not description.endswith(" "):
+                            description += " "
+                        # Format examples with proper punctuation
+                        examples_str = ", ".join(f"`{ex}`" for ex in enum_examples)
+                        if len(enum_examples) == 3 and len(list(field.python_type)) > 3:
+                            examples_str += ", ..."
+                        description += f"Examples: {examples_str}"
+            except (ImportError, TypeError, AttributeError):
+                pass
 
             # Add default value if present and meaningful
             if not field.is_required and field.default_value is not None:
