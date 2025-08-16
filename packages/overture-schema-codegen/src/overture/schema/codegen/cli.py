@@ -2,6 +2,7 @@
 
 import importlib
 import inspect
+import re
 from typing import Any
 
 import click
@@ -20,6 +21,15 @@ from .plantuml import (
     generate_plantuml_class_diagram,
 )
 from .spark_scala import generate_spark_scala_code
+
+
+def _to_snake_case(name: str) -> str:
+    """Convert CamelCase to snake_case."""
+    # Insert underscore before uppercase letters that follow lowercase letters or digits
+    s1 = re.sub("([a-z0-9])([A-Z])", r"\1_\2", name)
+    # Insert underscore before uppercase letters that are followed by lowercase letters
+    s2 = re.sub("([A-Z])([A-Z][a-z])", r"\1_\2", s1)
+    return s2.lower()
 
 
 @click.group()
@@ -59,6 +69,23 @@ def _load_model_class(module_path: str, class_name: str) -> type[BaseModel] | An
         )
     except ValueError as e:
         raise click.ClickException(str(e))
+
+
+def _extract_theme_from_enum(enum_class: type[Any]) -> str | None:
+    """Extract theme name from an Enum class based on its module path."""
+    if hasattr(enum_class, "__module__"):
+        module_parts = enum_class.__module__.split(".")
+        for part in module_parts:
+            if part.endswith("-theme") or part in [
+                "transportation",
+                "buildings",
+                "places",
+                "addresses",
+                "base",
+                "divisions",
+            ]:
+                return part.replace("-theme", "")
+    return None
 
 
 def _extract_theme_from_model(model_class: type[BaseModel] | Any) -> str | None:
@@ -486,11 +513,15 @@ def _generate_single_mdx_file(
     click_module: Any,
 ) -> None:
     """Generate MDX documentation for a single model."""
+    # Create theme-based directory structure
+    theme = _extract_theme_from_model(model_class)
+
     # Generate MDX documentation
     mdx_content = generate_mdx_documentation(
         model_class,
         include_hierarchy=hierarchy,
         include_field_descriptions=True,
+        current_theme=theme,
     )
 
     # Get model name for file naming
@@ -504,8 +535,6 @@ def _generate_single_mdx_file(
     if output_dir:
         import os
 
-        # Create theme-based directory structure
-        theme = _extract_theme_from_model(model_class)
         if theme:
             theme_dir = os.path.join(output_dir, theme)
             os.makedirs(theme_dir, exist_ok=True)
@@ -515,7 +544,8 @@ def _generate_single_mdx_file(
             output_path = output_dir
 
         # Write MDX documentation
-        filename = f"{model_name}.mdx"
+        snake_case_name = _to_snake_case(model_name)
+        filename = f"{snake_case_name}.mdx"
         filepath = os.path.join(output_path, filename)
         with open(filepath, "w") as f:
             f.write(mdx_content)
@@ -541,13 +571,20 @@ def _generate_single_enum_mdx_file(
     if output_dir:
         import os
 
-        # Create enums subdirectory
-        enums_dir = os.path.join(output_dir, "enums")
-        os.makedirs(enums_dir, exist_ok=True)
+        # Create theme-based directory structure (same as models)
+        theme = _extract_theme_from_enum(enum_class)
+        if theme:
+            theme_dir = os.path.join(output_dir, theme)
+            os.makedirs(theme_dir, exist_ok=True)
+            output_path = theme_dir
+        else:
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = output_dir
 
         # Write MDX documentation
-        filename = f"{enum_name}.mdx"
-        filepath = os.path.join(enums_dir, filename)
+        snake_case_name = _to_snake_case(enum_name)
+        filename = f"{snake_case_name}.mdx"
+        filepath = os.path.join(output_path, filename)
         with open(filepath, "w") as f:
             f.write(mdx_content)
         click_module.echo(f"  Generated enum MDX documentation written to: {filepath}")

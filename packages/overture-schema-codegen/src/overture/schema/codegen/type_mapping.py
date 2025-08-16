@@ -1,6 +1,7 @@
 """Type mapping utilities for converting Python types to Spark Scala and Spark SQL types."""
 
 import inspect
+import re
 from typing import Annotated, Any, Union, get_args, get_origin
 
 from pydantic import BaseModel
@@ -11,6 +12,58 @@ except ImportError:
     # Fallback if abstract types are not available
     def get_target_type(abstract_type, target):
         return None
+
+
+def _to_snake_case(name: str) -> str:
+    """Convert CamelCase to snake_case."""
+    # Insert underscore before uppercase letters that follow lowercase letters or digits
+    s1 = re.sub("([a-z0-9])([A-Z])", r"\1_\2", name)
+    # Insert underscore before uppercase letters that are followed by lowercase letters
+    s2 = re.sub("([A-Z])([A-Z][a-z])", r"\1_\2", s1)
+    return s2.lower()
+
+
+def _extract_theme_from_enum(enum_class: type[Any]) -> str | None:
+    """Extract theme name from an Enum class based on its module path."""
+    if hasattr(enum_class, "__module__"):
+        module_parts = enum_class.__module__.split(".")
+        for part in module_parts:
+            if part.endswith("-theme") or part in [
+                "transportation",
+                "buildings",
+                "places",
+                "addresses",
+                "base",
+                "divisions",
+            ]:
+                return part.replace("-theme", "")
+    return None
+
+
+def _get_enum_link_path(enum_class: type[Any], current_theme: str | None = None) -> str:
+    """Generate the correct relative path for an enum link."""
+    enum_theme = _extract_theme_from_enum(enum_class)
+    snake_case_name = _to_snake_case(enum_class.__name__)
+
+    # If both are in the same theme or enum has no theme (root level)
+    if enum_theme == current_theme or enum_theme is None:
+        if current_theme is None:
+            # Both in root
+            return snake_case_name
+        elif enum_theme is None:
+            # Enum in root, current in theme - need to go up one level
+            return f"../{snake_case_name}"
+        else:
+            # Both in same theme
+            return snake_case_name
+    else:
+        # Different themes - need to navigate between theme directories
+        if current_theme is None:
+            # Current in root, enum in theme
+            return f"{enum_theme}/{snake_case_name}"
+        else:
+            # Both in different themes
+            return f"../{enum_theme}/{snake_case_name}"
 
 
 def map_python_type_to_spark_scala(
@@ -388,7 +441,8 @@ def _map_python_type_to_documented_without_backticks(
 
     # Check if this is a BaseModel (nested structure)
     if inspect.isclass(python_type) and issubclass(python_type, BaseModel):
-        base_type = f"object (`[{python_type.__name__}](TK)`)"
+        snake_case_name = _to_snake_case(python_type.__name__)
+        base_type = f"object (`[{python_type.__name__}]({snake_case_name})`)"
         return f"{base_type} (optional)" if is_nullable else base_type
 
     # Check if this is an enum
@@ -397,10 +451,11 @@ def _map_python_type_to_documented_without_backticks(
 
         if inspect.isclass(python_type) and issubclass(python_type, enum.Enum):
             # Check if it's a string enum (inherits from str, Enum)
+            snake_case_name = _to_snake_case(python_type.__name__)
             if issubclass(python_type, str):
-                base_type = f"string ([{python_type.__name__}](TK))"
+                base_type = f"string ([{python_type.__name__}]({snake_case_name}))"
             else:
-                base_type = f"[{python_type.__name__}](TK)"
+                base_type = f"[{python_type.__name__}]({snake_case_name})"
             return f"{base_type} (optional)" if is_nullable else base_type
     except (ImportError, TypeError):
         pass
@@ -415,7 +470,10 @@ def _map_python_type_to_documented_without_backticks(
 
 
 def map_python_type_to_documented(
-    python_type: type, is_nullable: bool = False, field_name: str = ""
+    python_type: type,
+    is_nullable: bool = False,
+    field_name: str = "",
+    current_theme: str | None = None,
 ) -> str:
     """Map Python types to human-readable documented types."""
     # Handle arrays/lists in field paths - not part of this function
@@ -431,7 +489,9 @@ def map_python_type_to_documented(
     # Handle NewType by checking the underlying type first
     if hasattr(python_type, "__supertype__"):
         underlying_type = python_type.__supertype__
-        return map_python_type_to_documented(underlying_type, is_nullable, field_name)
+        return map_python_type_to_documented(
+            underlying_type, is_nullable, field_name, current_theme
+        )
 
     # Handle Annotated types
     origin = get_origin(python_type)
@@ -440,7 +500,9 @@ def map_python_type_to_documented(
         if args:
             # The first argument is the actual type
             actual_type = args[0]
-            return map_python_type_to_documented(actual_type, is_nullable, field_name)
+            return map_python_type_to_documented(
+                actual_type, is_nullable, field_name, current_theme
+            )
 
     # Handle Optional types (both Union[T, None] and T | None syntax)
     import types
@@ -456,12 +518,14 @@ def map_python_type_to_documented(
         if len(args) == 2 and type(None) in args:
             non_none_type = args[0] if args[1] is type(None) else args[1]
             # Recursively handle the non-None type
-            base_type = map_python_type_to_documented(non_none_type, False, field_name)
+            base_type = map_python_type_to_documented(
+                non_none_type, False, field_name, current_theme
+            )
             return f"{base_type} (optional)" if not is_nullable else base_type
 
         # For other unions, show all variants
         variant_types = [
-            map_python_type_to_documented(arg, False, "")
+            map_python_type_to_documented(arg, False, "", current_theme)
             for arg in args
             if arg is not type(None)
         ]
@@ -502,7 +566,8 @@ def map_python_type_to_documented(
 
     # Check if this is a BaseModel (nested structure)
     if inspect.isclass(python_type) and issubclass(python_type, BaseModel):
-        base_type = f"`object` (`[{python_type.__name__}](TK)`)"
+        snake_case_name = _to_snake_case(python_type.__name__)
+        base_type = f"`object` (`[{python_type.__name__}]({snake_case_name})`)"
         return f"{base_type} (optional)" if is_nullable else base_type
 
     # Check if this is an enum
@@ -511,10 +576,11 @@ def map_python_type_to_documented(
 
         if inspect.isclass(python_type) and issubclass(python_type, enum.Enum):
             # Check if it's a string enum (inherits from str, Enum)
+            enum_link_path = _get_enum_link_path(python_type, current_theme)
             if issubclass(python_type, str):
-                base_type = f"`string` ([{python_type.__name__}](TK))"
+                base_type = f"`string` ([{python_type.__name__}]({enum_link_path}))"
             else:
-                base_type = f"[{python_type.__name__}](TK)"
+                base_type = f"[{python_type.__name__}]({enum_link_path})"
 
             return f"{base_type} (optional)" if is_nullable else base_type
     except (ImportError, TypeError):

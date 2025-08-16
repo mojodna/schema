@@ -19,6 +19,7 @@ def generate_mdx_documentation(
     model_class_or_union: type[BaseModel] | Any,
     include_hierarchy: bool = False,
     include_field_descriptions: bool = True,
+    current_theme: str | None = None,
 ) -> str:
     """Generate MDX documentation for a Pydantic model or discriminated union.
 
@@ -39,12 +40,14 @@ def generate_mdx_documentation(
             discriminator,
             variants,
             include_field_descriptions,
+            current_theme,
         )
     else:
         return _generate_model_mdx(
             model_class_or_union,
             include_hierarchy,
             include_field_descriptions,
+            current_theme,
         )
 
 
@@ -53,6 +56,7 @@ def _generate_union_mdx(
     discriminator: str,
     variants: list[type[BaseModel]],
     include_field_descriptions: bool,
+    current_theme: str | None = None,
 ) -> str:
     """Generate MDX documentation for a discriminated union."""
     mdx_content = []
@@ -95,7 +99,9 @@ def _generate_union_mdx(
 
     if unified_fields:
         mdx_content.extend(
-            _format_fields_as_mdx(unified_fields, include_field_descriptions)
+            _format_fields_as_mdx(
+                unified_fields, include_field_descriptions, current_theme
+            )
         )
 
     return "\n".join(mdx_content)
@@ -246,6 +252,7 @@ def _generate_model_mdx(
     model_class: type[BaseModel],
     include_hierarchy: bool,
     include_field_descriptions: bool,
+    current_theme: str | None = None,
 ) -> str:
     """Generate MDX documentation for a single Pydantic model."""
     if not (inspect.isclass(model_class) and issubclass(model_class, BaseModel)):
@@ -267,13 +274,15 @@ def _generate_model_mdx(
     if include_hierarchy:
         hierarchy = get_model_hierarchy(model_class)
         mdx_content.extend(
-            _format_hierarchy_as_mdx(hierarchy, include_field_descriptions)
+            _format_hierarchy_as_mdx(
+                hierarchy, include_field_descriptions, current_theme
+            )
         )
     else:
         try:
             fields = extract_fields_recursive(model_class)
             mdx_content.extend(
-                _format_fields_as_mdx(fields, include_field_descriptions)
+                _format_fields_as_mdx(fields, include_field_descriptions, current_theme)
             )
         except Exception as e:
             mdx_content.append("## Fields")
@@ -287,6 +296,7 @@ def _generate_model_mdx(
 def _format_fields_as_mdx(
     fields: list[FieldInfo],
     include_descriptions: bool,
+    current_theme: str | None = None,
 ) -> list[str]:
     """Format a list of fields as MDX table content."""
     content = []
@@ -321,6 +331,7 @@ def _format_fields_as_mdx(
                 field.python_type,
                 field.is_nullable or not field.is_required,
                 field.name,
+                current_theme,
             )
 
             description = field.description or ""
@@ -397,6 +408,7 @@ def _format_field_name_with_arrays(field_name: str) -> str:
 def _format_hierarchy_as_mdx(
     hierarchy: dict[str, Any],
     include_descriptions: bool,
+    current_theme: str | None = None,
 ) -> list[str]:
     """Format hierarchical model structure as MDX content."""
     content = []
