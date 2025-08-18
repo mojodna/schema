@@ -15,7 +15,10 @@ from .introspection import (
     get_model_hierarchy,
     is_discriminated_union,
 )
-from .mdx import generate_enum_mdx_documentation, generate_mdx_documentation
+from .markdown import (
+    generate_enum_markdown_documentation,
+    generate_markdown_documentation,
+)
 from .plantuml import (
     generate_combined_plantuml_diagram,
     generate_plantuml_class_diagram,
@@ -193,7 +196,7 @@ def _discover_overture_models() -> list[type[BaseModel] | Any]:
             "typescript",
             "rust",
             "introspect",
-            "mdx",
+            "markdown",
         ],
         case_sensitive=False,
     ),
@@ -266,8 +269,8 @@ def generate(
         f"Processing {len(models_to_process)} model(s) with format: {format}", err=True
     )
 
-    # For MDX format, collect all types from all models first
-    if format == "mdx":
+    # For Markdown format, collect all types from all models first
+    if format == "markdown":
         all_collected_types = set()
         all_collected_enums = set()
 
@@ -279,30 +282,34 @@ def generate(
             all_collected_enums.update(enums_from_model)
 
         click.echo(
-            f"Generating MDX for {len(all_collected_types)} unique BaseModel types and {len(all_collected_enums)} unique Enum types",
+            f"Generating Markdown for {len(all_collected_types)} unique BaseModel types and {len(all_collected_enums)} unique Enum types",
             err=True,
         )
 
-        # Generate MDX for each unique BaseModel type found
+        # Generate Markdown for each unique BaseModel type found
         for found_model in sorted(all_collected_types, key=lambda m: m.__name__):
             try:
-                _generate_single_mdx_file(found_model, output_dir, hierarchy, click)
+                _generate_single_markdown_file(
+                    found_model, output_dir, hierarchy, click
+                )
             except Exception as e:
                 click.echo(
-                    f"  Error generating MDX for {found_model.__name__}: {e}", err=True
+                    f"  Error generating Markdown for {found_model.__name__}: {e}",
+                    err=True,
                 )
 
-        # Generate MDX for each unique Enum type found
+        # Generate Markdown for each unique Enum type found
         for found_enum in sorted(all_collected_enums, key=lambda e: e.__name__):
             try:
-                _generate_single_enum_mdx_file(found_enum, output_dir, click)
+                _generate_single_enum_markdown_file(found_enum, output_dir, click)
             except Exception as e:
                 click.echo(
-                    f"  Error generating MDX for {found_enum.__name__}: {e}", err=True
+                    f"  Error generating Markdown for {found_enum.__name__}: {e}",
+                    err=True,
                 )
         return
 
-    # Process each model (original behavior for non-MDX)
+    # Process each model (original behavior for non-Markdown)
     for model_class in models_to_process:
         if format == "introspect":
             # Handle naming for discriminated unions
@@ -506,18 +513,18 @@ def diagram(
         click.echo(final_output)
 
 
-def _generate_single_mdx_file(
+def _generate_single_markdown_file(
     model_class: type[BaseModel] | Any,
     output_dir: str | None,
     hierarchy: bool,
     click_module: Any,
 ) -> None:
-    """Generate MDX documentation for a single model."""
+    """Generate Markdown documentation for a single model."""
     # Create theme-based directory structure
     theme = _extract_theme_from_model(model_class)
 
-    # Generate MDX documentation
-    mdx_content = generate_mdx_documentation(
+    # Generate Markdown documentation
+    markdown_content = generate_markdown_documentation(
         model_class,
         include_hierarchy=hierarchy,
         include_field_descriptions=True,
@@ -543,26 +550,25 @@ def _generate_single_mdx_file(
             os.makedirs(output_dir, exist_ok=True)
             output_path = output_dir
 
-        # Write MDX documentation
+        # Write Markdown documentation
         snake_case_name = _to_snake_case(model_name)
-        filename = f"{snake_case_name}.mdx"
+        filename = f"{snake_case_name}.md"
         filepath = os.path.join(output_path, filename)
         with open(filepath, "w") as f:
-            f.write(mdx_content)
-        click_module.echo(f"  Generated MDX documentation written to: {filepath}")
+            f.write(markdown_content)
     else:
         # Output to stdout
-        click_module.echo(mdx_content)
+        click_module.echo(markdown_content)
 
 
-def _generate_single_enum_mdx_file(
+def _generate_single_enum_markdown_file(
     enum_class: type[Any],
     output_dir: str | None,
     click_module: Any,
 ) -> None:
-    """Generate MDX documentation for a single enum."""
-    # Generate MDX documentation
-    mdx_content = generate_enum_mdx_documentation(enum_class)
+    """Generate Markdown documentation for a single enum."""
+    # Generate Markdown documentation
+    markdown_content = generate_enum_markdown_documentation(enum_class)
 
     # Get enum name for file naming
     enum_name = enum_class.__name__
@@ -581,16 +587,15 @@ def _generate_single_enum_mdx_file(
             os.makedirs(output_dir, exist_ok=True)
             output_path = output_dir
 
-        # Write MDX documentation
+        # Write Markdown documentation
         snake_case_name = _to_snake_case(enum_name)
-        filename = f"{snake_case_name}.mdx"
+        filename = f"{snake_case_name}.md"
         filepath = os.path.join(output_path, filename)
         with open(filepath, "w") as f:
-            f.write(mdx_content)
-        click_module.echo(f"  Generated enum MDX documentation written to: {filepath}")
+            f.write(markdown_content)
     else:
         # Output to stdout
-        click_module.echo(mdx_content)
+        click_module.echo(markdown_content)
 
 
 def _print_hierarchy(hierarchy: dict[str, Any], indent: int = 0) -> None:

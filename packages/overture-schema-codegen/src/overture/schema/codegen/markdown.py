@@ -1,7 +1,8 @@
-"""MDX documentation generation from Pydantic models."""
+"""Markdown documentation generation from Pydantic models."""
 
 import enum
 import inspect
+import os
 from typing import Any
 
 from pydantic import BaseModel
@@ -15,13 +16,13 @@ from .introspection import (
 from .type_mapping import get_enum_examples, map_python_type_to_documented
 
 
-def generate_mdx_documentation(
+def generate_markdown_documentation(
     model_class_or_union: type[BaseModel] | Any,
     include_hierarchy: bool = False,
     include_field_descriptions: bool = True,
     current_theme: str | None = None,
 ) -> str:
-    """Generate MDX documentation for a Pydantic model or discriminated union.
+    """Generate Markdown documentation for a Pydantic model or discriminated union.
 
     Args:
         model_class_or_union: The Pydantic model class or discriminated union to document
@@ -29,13 +30,13 @@ def generate_mdx_documentation(
         include_field_descriptions: Whether to include field descriptions
 
     Returns:
-        MDX formatted documentation string
+        Markdown formatted documentation string
     """
     # Check if it's a discriminated union
     is_union, discriminator, variants = is_discriminated_union(model_class_or_union)
 
     if is_union and variants and discriminator:
-        return _generate_union_mdx(
+        return _generate_union_markdown(
             model_class_or_union,
             discriminator,
             variants,
@@ -43,7 +44,7 @@ def generate_mdx_documentation(
             current_theme,
         )
     else:
-        return _generate_model_mdx(
+        return _generate_model_markdown(
             model_class_or_union,
             include_hierarchy,
             include_field_descriptions,
@@ -51,15 +52,15 @@ def generate_mdx_documentation(
         )
 
 
-def _generate_union_mdx(
+def _generate_union_markdown(
     union_type: Any,
     discriminator: str,
     variants: list[type[BaseModel]],
     include_field_descriptions: bool,
     current_theme: str | None = None,
 ) -> str:
-    """Generate MDX documentation for a discriminated union."""
-    mdx_content = []
+    """Generate Markdown documentation for a discriminated union."""
+    markdown_content = []
 
     # Create a unified title using the union type name if available
     if hasattr(union_type, "__name__") and union_type.__name__ != "Annotated":
@@ -86,25 +87,39 @@ def _generate_union_mdx(
             variant_names = [v.__name__ for v in variants]
             title = f"Discriminated Union: {', '.join(variant_names)}"
 
-    mdx_content.append(f"# {title}")
-    mdx_content.append("")
+    markdown_content.append(f"# {title}")
+    markdown_content.append("")
 
     # Add docstring if available
     if hasattr(union_type, "__doc__") and union_type.__doc__:
-        mdx_content.append(union_type.__doc__)
-        mdx_content.append("")
+        markdown_content.append(union_type.__doc__)
+        markdown_content.append("")
 
     # Generate unified fields table (similar to Spark Scala approach)
     unified_fields = _generate_unified_fields_for_union(discriminator, variants)
 
     if unified_fields:
-        mdx_content.extend(
-            _format_fields_as_mdx(
+        markdown_content.extend(
+            _format_fields_as_markdown(
                 unified_fields, include_field_descriptions, current_theme
             )
         )
 
-    return "\n".join(mdx_content)
+    # Add examples section for union variants
+    try:
+        all_examples = []
+        for variant in variants:
+            examples = _load_examples_for_model(variant)
+            if examples:
+                all_examples.extend(examples)
+
+        if all_examples:
+            markdown_content.extend(_format_examples_as_markdown(all_examples, title))
+    except Exception:
+        # If we can't load examples, just continue without them
+        pass
+
+    return "\n".join(markdown_content)
 
 
 def _generate_unified_fields_for_union(
@@ -116,8 +131,6 @@ def _generate_unified_fields_for_union(
     Creates a runtime mixin class that combines all variant fields,
     then uses standard Pydantic field extraction on that unified model.
     """
-    from typing import Any, Optional
-
     from pydantic import Field
 
     from .introspection import extract_fields_recursive
@@ -151,7 +164,7 @@ def _generate_unified_fields_for_union(
 
                 # Convert to Optional if not already
                 if not _is_optional_annotation(original_annotation):
-                    optional_annotation = Optional[original_annotation]
+                    optional_annotation = original_annotation | None
                 else:
                     optional_annotation = original_annotation
 
@@ -248,57 +261,71 @@ def get_discriminator_value(variant: type[BaseModel], discriminator: str) -> str
         return variant.__name__.lower()
 
 
-def _generate_model_mdx(
+def _generate_model_markdown(
     model_class: type[BaseModel],
     include_hierarchy: bool,
     include_field_descriptions: bool,
     current_theme: str | None = None,
 ) -> str:
-    """Generate MDX documentation for a single Pydantic model."""
+    """Generate Markdown documentation for a single Pydantic model."""
     if not (inspect.isclass(model_class) and issubclass(model_class, BaseModel)):
         raise ValueError(f"Expected a Pydantic BaseModel class, got {model_class}")
 
-    mdx_content = []
+    markdown_content = []
 
     # Title
-    mdx_content.append(f"# {model_class.__name__}")
-    mdx_content.append("")
+    markdown_content.append(f"# {model_class.__name__}")
+    markdown_content.append("")
 
     # Model description from docstring
     docstring = inspect.getdoc(model_class)
     if docstring:
-        mdx_content.append(docstring)
-        mdx_content.append("")
+        markdown_content.append(docstring)
+        markdown_content.append("")
 
     # Fields section
     if include_hierarchy:
         hierarchy = get_model_hierarchy(model_class)
-        mdx_content.extend(
-            _format_hierarchy_as_mdx(
+        markdown_content.extend(
+            _format_hierarchy_as_markdown(
                 hierarchy, include_field_descriptions, current_theme
             )
         )
     else:
         try:
             fields = extract_fields_recursive(model_class)
-            mdx_content.extend(
-                _format_fields_as_mdx(fields, include_field_descriptions, current_theme)
+            markdown_content.extend(
+                _format_fields_as_markdown(
+                    fields, include_field_descriptions, current_theme
+                )
             )
         except Exception as e:
-            mdx_content.append("## Fields")
-            mdx_content.append("")
-            mdx_content.append(f"Error extracting fields: {e}")
-            mdx_content.append("")
+            markdown_content.append("## Fields")
+            markdown_content.append("")
+            markdown_content.append(f"Error extracting fields: {e}")
+            markdown_content.append("")
 
-    return "\n".join(mdx_content)
+    # Add examples section
+    try:
+        examples = _load_examples_for_model(model_class)
+        if examples:
+            markdown_content.extend(
+                _format_examples_as_markdown(examples, model_class.__name__)
+            )
+    except Exception:
+        # If we can't load examples, just continue without them
+        # This ensures the documentation generation doesn't fail
+        pass
+
+    return "\n".join(markdown_content)
 
 
-def _format_fields_as_mdx(
+def _format_fields_as_markdown(
     fields: list[FieldInfo],
     include_descriptions: bool,
     current_theme: str | None = None,
 ) -> list[str]:
-    """Format a list of fields as MDX table content."""
+    """Format a list of fields as Markdown table content."""
     content = []
 
     if not fields:
@@ -405,12 +432,12 @@ def _format_field_name_with_arrays(field_name: str) -> str:
     return field_name
 
 
-def _format_hierarchy_as_mdx(
+def _format_hierarchy_as_markdown(
     hierarchy: dict[str, Any],
     include_descriptions: bool,
     current_theme: str | None = None,
 ) -> list[str]:
-    """Format hierarchical model structure as MDX content."""
+    """Format hierarchical model structure as Markdown content."""
     content = []
 
     def _format_hierarchy_recursive(h: dict[str, Any], level: int = 2) -> None:
@@ -462,39 +489,269 @@ def _format_hierarchy_as_mdx(
     return content
 
 
-def generate_enum_mdx_documentation(enum_class: type[enum.Enum]) -> str:
-    """Generate MDX documentation for an Enum class.
+def generate_enum_markdown_documentation(enum_class: type[enum.Enum]) -> str:
+    """Generate Markdown documentation for an Enum class.
 
     Args:
         enum_class: The Enum class to document
 
     Returns:
-        MDX formatted documentation string
+        Markdown formatted documentation string
     """
     if not (inspect.isclass(enum_class) and issubclass(enum_class, enum.Enum)):
         raise ValueError(f"Expected an Enum class, got {enum_class}")
 
-    mdx_content = []
+    markdown_content = []
 
     # Title
-    mdx_content.append(f"# {enum_class.__name__}")
-    mdx_content.append("")
+    markdown_content.append(f"# {enum_class.__name__}")
+    markdown_content.append("")
 
     # Enum description from docstring
     docstring = inspect.getdoc(enum_class)
     if docstring:
-        mdx_content.append(docstring)
-        mdx_content.append("")
+        markdown_content.append(docstring)
+        markdown_content.append("")
 
     # Values section
-    mdx_content.append("## Values")
-    mdx_content.append("")
+    markdown_content.append("## Values")
+    markdown_content.append("")
 
     # Create simple list of values
     for enum_member in enum_class:
         value = enum_member.value
         # Add each value as a code block
-        mdx_content.append(f"- `{value}`")
+        markdown_content.append(f"- `{value}`")
 
-    mdx_content.append("")
-    return "\n".join(mdx_content)
+    markdown_content.append("")
+    return "\n".join(markdown_content)
+
+
+def _load_examples_for_model(model_class: type[BaseModel]) -> list[dict[str, Any]]:
+    """Load example data for a model from theme package pyproject.toml files.
+
+    Args:
+        model_class: The Pydantic model class to find examples for
+
+    Returns:
+        List of example dictionaries for the model
+    """
+    try:
+        # Try to load tomllib (Python 3.11+) or tomli as fallback
+        try:
+            import tomllib
+
+            toml_loads = tomllib.loads
+            toml_open_mode = "rb"
+        except ImportError:
+            try:
+                import tomli
+
+                toml_loads = tomli.loads
+                toml_open_mode = "rb"
+            except ImportError:
+                # Fallback to toml library if available
+                import toml
+
+                toml_loads = toml.loads
+                toml_open_mode = "r"
+    except ImportError:
+        # No TOML library available
+        return []
+
+    # Get the model class name
+    model_name = model_class.__name__
+
+    # Try to find the theme from the model's module path
+    theme_name = _extract_theme_from_model_module(model_class)
+    if not theme_name:
+        return []
+
+    # Look for pyproject.toml in the theme package
+    examples_data = _load_theme_examples(theme_name, toml_loads, toml_open_mode)
+
+    # Return examples for this specific model
+    return examples_data.get(model_name, [])
+
+
+def _extract_theme_from_model_module(model_class: type[BaseModel]) -> str | None:
+    """Extract theme name from a model's module path."""
+    if not hasattr(model_class, "__module__"):
+        return None
+
+    module_parts = model_class.__module__.split(".")
+    for part in module_parts:
+        if part.endswith("-theme"):
+            return part.replace("-theme", "")
+        elif part in [
+            "transportation",
+            "buildings",
+            "places",
+            "addresses",
+            "base",
+            "divisions",
+        ]:
+            return part
+    return None
+
+
+def _load_theme_examples(
+    theme_name: str, toml_loads: Any, toml_open_mode: str
+) -> dict[str, list[dict[str, Any]]]:
+    """Load example data from a theme package's pyproject.toml file.
+
+    Args:
+        theme_name: The theme name (e.g., 'addresses', 'buildings')
+        toml_loads: The TOML parsing function to use
+        toml_open_mode: File open mode ('rb' or 'r')
+
+    Returns:
+        Dictionary mapping model names to lists of examples
+    """
+    # Look for the theme package directory in the current workspace
+    theme_package_name = f"overture-schema-{theme_name}-theme"
+
+    # Try common locations for the pyproject.toml file
+    possible_paths = [
+        f"packages/{theme_package_name}/pyproject.toml",
+        f"../packages/{theme_package_name}/pyproject.toml",
+        f"../../packages/{theme_package_name}/pyproject.toml",
+        f"{theme_package_name}/pyproject.toml",
+    ]
+
+    for path in possible_paths:
+        if os.path.exists(path):
+            try:
+                if toml_open_mode == "rb":
+                    with open(path, "rb") as f:
+                        content = f.read()
+                    # tomli.loads expects str, not bytes
+                    if isinstance(content, bytes):
+                        content = content.decode("utf-8")
+                    data = toml_loads(content)
+                else:
+                    with open(path) as f:
+                        content = f.read()
+                    data = toml_loads(content)
+
+                return data.get("examples", {})
+            except Exception:
+                # If we can't parse the file, continue to next path
+                continue
+
+    return {}
+
+
+def _format_examples_as_markdown(
+    examples: list[dict[str, Any]], model_name: str
+) -> list[str]:
+    """Format example data as markdown table content.
+
+    Args:
+        examples: List of example dictionaries
+        model_name: Name of the model for the section header
+
+    Returns:
+        List of markdown content lines
+    """
+    if not examples:
+        return []
+
+    content = []
+    content.append("## Examples")
+    content.append("")
+
+    for i, example in enumerate(examples, 1):
+        # Add example header if there are multiple examples
+        if len(examples) > 1:
+            content.append(f"### Example {i}")
+            content.append("")
+
+        # Create table with flattened example data
+        content.append("| Column | Value |")
+        content.append("|-------:|-------|")
+
+        # Flatten the example data and format as table rows
+        flattened = _flatten_example_dict(example)
+
+        for field_name, value in flattened.items():
+            # Format the value for display
+            formatted_value = _format_example_value(value)
+
+            # Escape pipes in values
+            formatted_value = formatted_value.replace("|", "\\|")
+
+            content.append(f"| `{field_name}` | {formatted_value} |")
+
+        content.append("")
+
+    return content
+
+
+def _flatten_example_dict(data: dict[str, Any], prefix: str = "") -> dict[str, Any]:
+    """Flatten nested dictionary into dot-notation keys.
+
+    Args:
+        data: Dictionary to flatten
+        prefix: Prefix for keys (for recursive calls)
+
+    Returns:
+        Flattened dictionary
+    """
+    flattened = {}
+
+    for key, value in data.items():
+        full_key = f"{prefix}.{key}" if prefix else key
+
+        if isinstance(value, dict):
+            # Skip special nested objects like bbox for now - they're not part of the main model
+            if key in ["bbox"]:
+                continue
+            # Recursively flatten nested dictionaries
+            flattened.update(_flatten_example_dict(value, full_key))
+        elif isinstance(value, list) and value and isinstance(value[0], dict):
+            # For lists of dictionaries, show the structure with array notation
+            for i, item in enumerate(value):
+                if isinstance(item, dict):
+                    flattened.update(_flatten_example_dict(item, f"{full_key}[{i}]"))
+                else:
+                    flattened[f"{full_key}[{i}]"] = item
+        else:
+            flattened[full_key] = value
+
+    return flattened
+
+
+def _format_example_value(value: Any) -> str:
+    """Format an example value for display in markdown table.
+
+    Args:
+        value: The value to format
+
+    Returns:
+        Formatted string representation
+    """
+    if value is None or value == "null":
+        return "`null`"
+    elif isinstance(value, bool):
+        return f"`{str(value).lower()}`"
+    elif isinstance(value, str):
+        # For long strings like geometry, truncate them
+        if len(value) > 100:
+            return f"`{value[:100]}...`"
+        elif len(value):
+            return f"`{value}`"
+        else:
+            return ""
+    elif isinstance(value, int | float):
+        return f"`{value}`"
+    elif isinstance(value, list):
+        if not value:
+            return "`[]`"
+        # Show first few items
+        items = [str(v) for v in value[:3]]
+        if len(value) > 3:
+            items.append("...")
+        return f"`[{', '.join(items)}]`"
+    else:
+        return f"`{str(value)}`"

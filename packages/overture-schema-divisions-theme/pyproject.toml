@@ -36,3 +36,155 @@ packages = ["src/overture"]
 "divisions.division" = "overture.schema.divisions.division.models:Division"
 "divisions.division_area" = "overture.schema.divisions.division_area.models:DivisionArea"
 "divisions.division_boundary" = "overture.schema.divisions.division_boundary.models:DivisionBoundary"
+
+# duckdb -json -c "load spatial" -c "select to_json(columns(*)) from (select * REPLACE ST_AsText(geometry) as geometry from read_parquet('geoparquet-samples/division.geoparquet') USING SAMPLE 1)" | jq .
+[[examples.Division]]
+id = "350e85f6-68ba-4114-9906-c2844815988b"
+geometry = "POINT (-175.2551522 -21.1353686)"
+country = "TO"
+version = 1
+subtype = "locality"
+class = "village"
+wikidata = "null"
+region = "TO-04"
+perspectives = "null"
+parent_division_id = "8730f0cc-d436-4f11-a7d3-49085813ef44"
+norms = "null"
+population = 534
+capital_division_ids = "null"
+capital_of_divisions = "null"
+theme = "divisions"
+type = "division"
+
+[examples.Division.bbox]
+xmin = -175.25515747070312
+xmax = -175.255126953125
+ymin = -21.1353702545166
+ymax = -21.13536834716797
+
+[[examples.Division.sources]]
+property = ""
+dataset = "OpenStreetMap"
+record_id = "n3173231082@4"
+update_time = "2014-12-18T09:17:03Z"
+confidence = "null"
+between = "null"
+
+[examples.Division.cartography]
+prominence = 29
+min_zoom = "null"
+max_zoom = "null"
+sort_key = "null"
+
+[examples.Division.names]
+primary = "Sia'atoutai"
+common = "null"
+
+[[examples.Division.names.rules]]
+variant = "alternate"
+language = "null"
+perspectives = "null"
+value = "Nafualu"
+between = "null"
+side = "null"
+
+[examples.Division.local_type]
+en = "village"
+
+[[examples.Division.hierarchies]]
+
+[[examples.Division.hierarchies.hierarchies]]
+division_id = "fef8748b-0c91-46ad-9f2d-976d8d2de3e9"
+subtype = "country"
+name = "Tonga"
+
+[[examples.Division.hierarchies.hierarchies]]
+division_id = "4d67561a-2292-41bd-8996-7853d276a42c"
+subtype = "region"
+name = "Tongatapu"
+
+[[examples.Division.hierarchies.hierarchies]]
+division_id = "8730f0cc-d436-4f11-a7d3-49085813ef44"
+subtype = "county"
+name = "Vahe Kolomotu'a"
+
+[[examples.Division.hierarchies.hierarchies]]
+division_id = "350e85f6-68ba-4114-9906-c2844815988b"
+subtype = "locality"
+name = "Sia'atoutai"
+
+# duckdb -json -c "load spatial" -c "select to_json(columns(*)) from (select * REPLACE ST_AsText(geometry) as geometry from read_parquet('geoparquet-samples/division_area.geoparquet') USING SAMPLE 1)" | jq .
+[[examples.DivisionArea]]
+id = "7080b91a-d015-4506-8a24-f57c978b54c2"
+geometry = "POLYGON ((-178.950516 -17.3431421, -178.9509773 -17.3430806, -178.9523774 -17.3428912, -178.9524762 -17.3436327, -178.9510713 -17.3436369, -178.9510315 -17.3441682, -178.9498254 -17.3442062, -178.9475943 -17.3435399, -178.9481413 -17.3427428, -178.9485429 -17.342903, -178.9495205 -17.3431182, -178.9504925 -17.3431899, -178.950516 -17.3431421))"
+country = "FJ"
+version = 1
+subtype = "locality"
+class = "land"
+is_land = true
+is_territorial = true
+region = "FJ-E"
+division_id = "8183f909-ed92-49f0-90fe-10a35adad6ed"
+theme = "divisions"
+type = "division_area"
+
+[examples.DivisionArea.bbox]
+xmin = -178.95249938964844
+xmax = -178.94757080078125
+ymin = -17.344207763671875
+ymax = -17.342741012573242
+
+[[examples.DivisionArea.sources]]
+property = ""
+dataset = "OpenStreetMap"
+record_id = "w399511500@2"
+update_time = "2018-08-20T18:24:58Z"
+confidence = "null"
+between = "null"
+
+[examples.DivisionArea.names]
+primary = "Susui"
+common = "null"
+rules = "null"
+
+# duckdb -json -c "load spatial" -c "select to_json(columns(*)) from (select * REPLACE ST_AsText(geometry) as geometry from read_parquet('geoparquet-samples/division_boundary.geoparquet') USING SAMPLE 1)" | jq .
+[[examples.DivisionBoundary]]
+id = "2bdf68e4-860d-3d8c-a472-ccf439a5302a"
+geometry = "LINESTRING (-147.064823 -15.4231537, -147.0519131 -15.2885069, -147.048482 -15.1511701)"
+country = "PF"
+version = 1
+subtype = "county"
+class = "maritime"
+is_land = false
+is_territorial = true
+division_ids = [
+  "ae266459-63a4-4508-8295-0101e27d039b",
+  "d4a6873d-885a-4f2a-bc0f-37e9d9e874e4"
+]
+region = "null"
+is_disputed = false
+perspectives = "null"
+theme = "divisions"
+type = "division_boundary"
+
+[examples.DivisionBoundary.bbox]
+xmin = -147.06483459472656
+xmax = -147.04847717285156
+ymin = -15.4231538772583
+ymax = -15.151169776916504
+
+[[examples.DivisionBoundary.sources]]
+property = ""
+dataset = "OpenStreetMap"
+record_id = "r6063055@9"
+update_time = "2023-07-20T00:28:40Z"
+confidence = "null"
+between = "null"
+
+[[examples.DivisionBoundary.sources]]
+property = ""
+dataset = "OpenStreetMap"
+record_id = "r6063063@12"
+update_time = "2023-07-20T00:28:40Z"
+confidence = "null"
+between = "null"
