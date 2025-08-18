@@ -3,7 +3,7 @@
 import enum
 import inspect
 import os
-from typing import Any
+from typing import Annotated, Any, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -211,7 +211,7 @@ def _generate_unified_fields_for_union(
 def _is_optional_annotation(annotation: Any) -> bool:
     """Check if an annotation is already Optional/Union with None."""
     import types
-    from typing import Union, get_args, get_origin
+    from typing import Union
 
     # Handle new union syntax (Python 3.10+)
     if isinstance(annotation, types.UnionType):
@@ -310,7 +310,9 @@ def _generate_model_markdown(
         examples = _load_examples_for_model(model_class)
         if examples:
             markdown_content.extend(
-                _format_examples_as_markdown(examples, model_class.__name__)
+                _format_examples_as_markdown(
+                    examples, model_class.__name__, model_class
+                )
             )
     except Exception:
         # If we can't load examples, just continue without them
@@ -643,7 +645,9 @@ def _load_theme_examples(
 
 
 def _format_examples_as_markdown(
-    examples: list[dict[str, Any]], model_name: str
+    examples: list[dict[str, Any]],
+    model_name: str,
+    model_class: type[BaseModel] | None = None,
 ) -> list[str]:
     """Format example data as markdown table content.
 
@@ -674,7 +678,14 @@ def _format_examples_as_markdown(
         # Flatten the example data and format as table rows
         flattened = _flatten_example_dict(example)
 
-        for field_name, value in flattened.items():
+        # Sort using model annotations if available, otherwise alphabetically
+        if model_class is not None:
+            sort_key = _get_field_sort_key_from_model(model_class)
+            sorted_items = sorted(flattened.items(), key=sort_key)
+        else:
+            sorted_items = sorted(flattened.items())
+
+        for field_name, value in sorted_items:
             # Format the value for display
             formatted_value = _format_example_value(value)
 
@@ -755,3 +766,81 @@ def _format_example_value(value: Any) -> str:
         return f"`[{', '.join(items)}]`"
     else:
         return f"`{str(value)}`"
+
+
+class SortOrder:
+    """Annotation class for specifying field sort order in documentation.
+
+    Usage:
+        field_name: Annotated[str, SortOrder(10), Field(description="...")]
+    """
+
+    def __init__(self, order: int):
+        self.order = order
+
+
+def _get_field_sort_order(model_class: type[BaseModel], field_name: str) -> int:
+    """Extract sort order from field annotations.
+
+    Args:
+        model_class: The Pydantic model class
+        field_name: Name of the field to get sort order for
+
+    Returns:
+        Sort order integer, or 999 if no sort order is specified
+    """
+    try:
+        # Get the field's annotation from the model
+        if (
+            hasattr(model_class, "__annotations__")
+            and field_name in model_class.__annotations__
+        ):
+            annotation = model_class.__annotations__[field_name]
+
+            # Check if it's an Annotated type
+            if get_origin(annotation) is Annotated:
+                args = get_args(annotation)
+                if len(args) >= 2:
+                    # Look through metadata for SortOrder
+                    metadata = args[1:]
+                    for item in metadata:
+                        if isinstance(item, SortOrder):
+                            return item.order
+    except Exception:
+        # If anything goes wrong, just return default
+        pass
+
+    return 999  # Default sort order for fields without explicit ordering
+
+
+def _get_field_sort_key_from_model(model_class: type[BaseModel]) -> callable:
+    """Create a sort key function that uses field annotations from the model.
+
+    Args:
+        model_class: The Pydantic model class to extract sort orders from
+
+    Returns:
+        Function that can be used as a key for sorted()
+    """
+    # Get field definition order from the model
+    field_definition_order = {}
+    if hasattr(model_class, "__annotations__"):
+        for i, field_name in enumerate(model_class.__annotations__.keys()):
+            field_definition_order[field_name] = i
+
+    def sort_key(field_tuple: tuple[str, Any]) -> tuple[int, int, str]:
+        field_name = field_tuple[0]
+
+        # Handle nested field names by getting the base field name
+        base_field_name = field_name.split("[")[0].split(".")[0]
+
+        # Get sort order from model annotations
+        sort_order = _get_field_sort_order(model_class, base_field_name)
+
+        # Get definition order for tiebreaking
+        definition_order = field_definition_order.get(base_field_name, 999)
+
+        # Return tuple for sorting: (sort_order, definition_order, field_name for final tiebreaker)
+        return (sort_order, definition_order, field_name)
+
+    return sort_key
