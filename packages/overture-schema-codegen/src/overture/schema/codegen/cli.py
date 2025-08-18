@@ -91,6 +91,28 @@ def _extract_theme_from_enum(enum_class: type[Any]) -> str | None:
     return None
 
 
+def _extract_type_from_module(class_or_enum: type[Any]) -> str | None:
+    """Extract type name from a class or enum based on its module path."""
+    if hasattr(class_or_enum, "__module__"):
+        module_parts = class_or_enum.__module__.split(".")
+
+        # Look for the part after the theme
+        theme_found = False
+        for part in module_parts:
+            if theme_found and part not in ["models", "enums"]:
+                return part
+            if part.endswith("-theme") or part in [
+                "transportation",
+                "buildings",
+                "places",
+                "addresses",
+                "base",
+                "divisions",
+            ]:
+                theme_found = True
+    return None
+
+
 def _extract_theme_from_model(model_class: type[BaseModel] | Any) -> str | None:
     """Extract theme name from a Pydantic model or discriminated union."""
     from typing import get_args, get_origin
@@ -520,8 +542,9 @@ def _generate_single_markdown_file(
     click_module: Any,
 ) -> None:
     """Generate Markdown documentation for a single model."""
-    # Create theme-based directory structure
+    # Create theme/type-based directory structure
     theme = _extract_theme_from_model(model_class)
+    type_name = _extract_type_from_module(model_class)
 
     # Generate Markdown documentation
     markdown_content = generate_markdown_documentation(
@@ -542,7 +565,12 @@ def _generate_single_markdown_file(
     if output_dir:
         import os
 
-        if theme:
+        # Build nested directory structure: theme/type (if available)
+        if theme and type_name:
+            nested_dir = os.path.join(output_dir, theme, type_name)
+            os.makedirs(nested_dir, exist_ok=True)
+            output_path = nested_dir
+        elif theme:
             theme_dir = os.path.join(output_dir, theme)
             os.makedirs(theme_dir, exist_ok=True)
             output_path = theme_dir
@@ -577,9 +605,16 @@ def _generate_single_enum_markdown_file(
     if output_dir:
         import os
 
-        # Create theme-based directory structure (same as models)
+        # Create theme/type-based directory structure (same as models)
         theme = _extract_theme_from_enum(enum_class)
-        if theme:
+        type_name = _extract_type_from_module(enum_class)
+
+        # Build nested directory structure: theme/type (if available)
+        if theme and type_name:
+            nested_dir = os.path.join(output_dir, theme, type_name)
+            os.makedirs(nested_dir, exist_ok=True)
+            output_path = nested_dir
+        elif theme:
             theme_dir = os.path.join(output_dir, theme)
             os.makedirs(theme_dir, exist_ok=True)
             output_path = theme_dir
