@@ -101,18 +101,6 @@ class AbstractTypeRegistry:
             },
             json_schema_override={"type": "number"},
         ),
-        "GEOMETRY": AbstractTypeDefinition(
-            base=object,  # Generic base for geometry
-            target_mappings={
-                "scala": "Array[Byte]",
-                "scala+sedona": "org.locationtech.jts.geom.Geometry",
-                "spark": "BinaryType",
-                "spark+sedona": "GeometryType",
-                "parquet": "BYTE_ARRAY",  # WKB
-                "json": "custom",  # TODO GeoJSON
-                "documented": "geometry",
-            },
-        ),
         # Direct type mappings using Python types as keys
         str: AbstractTypeDefinition(
             base=str,
