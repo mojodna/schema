@@ -4,7 +4,7 @@ import enum
 import inspect
 import types
 from dataclasses import dataclass
-from typing import Annotated, Any, Optional, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Optional, Union, get_args, get_origin
 
 from pydantic import BaseModel, Field
 
@@ -209,6 +209,10 @@ def _get_base_type(annotation: Any) -> type:
             return args[0] if args[1] is type(None) else args[1]
         # For other unions, return the first non-None type
         return next((arg for arg in args if arg is not type(None)), args[0])
+
+    # Special handling for Literal types - preserve the full parameterized type
+    if origin is Literal:
+        return annotation
 
     if origin is not None:
         # For generic types like List[str], Dict[str, int], etc.

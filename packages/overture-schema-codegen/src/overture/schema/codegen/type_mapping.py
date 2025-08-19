@@ -2,7 +2,7 @@
 
 import inspect
 import re
-from typing import Annotated, Any, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -439,6 +439,31 @@ def _map_python_type_to_documented_without_backticks(
         ]
         return " | ".join(variant_types)
 
+    # Handle Literal types
+    if origin is Literal:
+        args = get_args(python_type)
+        if args:
+            # Format literal values for display (no backticks)
+            if len(args) == 1:
+                # Single literal value
+                literal_value = args[0]
+                if hasattr(literal_value, "value"):
+                    # Handle enum values in Literal
+                    base_type = f'"{literal_value.value}"'
+                else:
+                    base_type = f'"{literal_value}"'
+            else:
+                # Multiple literal values
+                formatted_values = []
+                for value in args:
+                    if hasattr(value, "value"):
+                        formatted_values.append(f'"{value.value}"')
+                    else:
+                        formatted_values.append(f'"{value}"')
+                base_type = " | ".join(formatted_values)
+
+            return f"{base_type} (optional)" if is_nullable else base_type
+
     # Check if this is a BaseModel (nested structure)
     if inspect.isclass(python_type) and issubclass(python_type, BaseModel):
         snake_case_name = _to_snake_case(python_type.__name__)
@@ -563,6 +588,31 @@ def map_python_type_to_documented(
         else:
             base_type = "`object`"  # Default fallback for string-to-string
         return f"{base_type} (optional)" if is_nullable else base_type
+
+    # Handle Literal types
+    if origin is Literal:
+        args = get_args(python_type)
+        if args:
+            # Format literal values for display
+            if len(args) == 1:
+                # Single literal value
+                literal_value = args[0]
+                if hasattr(literal_value, "value"):
+                    # Handle enum values in Literal
+                    base_type = f'`"{literal_value.value}"`'
+                else:
+                    base_type = f'`"{literal_value}"`'
+            else:
+                # Multiple literal values
+                formatted_values = []
+                for value in args:
+                    if hasattr(value, "value"):
+                        formatted_values.append(f'"{value.value}"')
+                    else:
+                        formatted_values.append(f'"{value}"')
+                base_type = f"`{' | '.join(formatted_values)}`"
+
+            return f"{base_type} (optional)" if is_nullable else base_type
 
     # Check if this is a BaseModel (nested structure)
     if inspect.isclass(python_type) and issubclass(python_type, BaseModel):
