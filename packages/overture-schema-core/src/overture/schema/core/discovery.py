@@ -1,21 +1,70 @@
 import importlib.metadata
+from dataclasses import dataclass
 from typing import cast
 
 from pydantic import BaseModel
 
 
-def discover_models() -> dict[tuple[str, str], type[BaseModel]]:
-    """Discover all registered Overture models via entry points."""
+@dataclass(frozen=True, slots=True)
+class ModelKey:
+    """Key identifying a registered model by namespace, theme, and type.
 
+    Args:
+        namespace: The namespace (e.g., "overture", "annex")
+        theme: The theme name (e.g., "buildings", "places"), or None for non-themed models
+        type: The feature type (e.g., "building", "place")
+    """
+
+    namespace: str
+    theme: str | None
+    type: str
+
+
+def discover_models(
+    namespace: str | None = None,
+) -> dict[ModelKey, type[BaseModel]]:
+    """Discover all registered Overture models via entry points.
+
+    Args:
+        namespace: Optional namespace filter. If provided, only models from this
+                   namespace will be returned (e.g., "overture", "annex").
+
+    Returns:
+        Dict mapping ModelKey to model classes.
+        Theme will be None for entries without an explicit theme component.
+
+    Entry point name format:
+        - Core themes: "overture:<theme>:<type>"
+        - Non-core (2-part): "annex:<type>" (theme will be None)
+        - Non-core (3-part): "annex:<theme>:<type>"
+    """
     models = {}
     try:
         for entry_point in importlib.metadata.entry_points(group="overture.models"):
-            # Parse theme.type from entry point name
-            # TODO add a 3rd component: namespace
-            theme, feature_type = entry_point.name.split(".", 1)
+            # Parse namespace:theme:type or namespace:type from entry point name
+            parts = entry_point.name.split(":", 2)
+
+            if len(parts) == 2:
+                # namespace:type format (no theme)
+                ns, feature_type = parts
+                theme = None
+            elif len(parts) == 3:
+                # namespace:theme:type format
+                ns, theme, feature_type = parts
+            else:
+                print(
+                    f"Warning: Invalid entry point format {entry_point.name}, expected namespace:theme:type or namespace:type"
+                )
+                continue
+
+            # Filter by namespace if specified
+            if namespace is not None and ns != namespace:
+                continue
+
             try:
                 model_class = entry_point.load()
-                models[(theme, feature_type)] = model_class
+                key = ModelKey(namespace=ns, theme=theme, type=feature_type)
+                models[key] = model_class
             except Exception as e:
                 # Log warning but don't fail for individual models
                 print(f"Warning: Could not load model {entry_point.name}: {e}")
@@ -25,18 +74,22 @@ def discover_models() -> dict[tuple[str, str], type[BaseModel]]:
     return models
 
 
-def get_registered_model(theme: str, feature_type: str) -> type[BaseModel] | None:
-    """Get the Pydantic model for a theme/type combination.
+def get_registered_model(
+    namespace: str, feature_type: str, theme: str | None = None
+) -> type[BaseModel] | None:
+    """Get the Pydantic model for a namespace/theme/type combination.
+
+    Args:
+        namespace: The namespace (e.g., "overture", "annex")
+        feature_type: The type name
+        theme: The theme name (optional)
+
+    Returns:
+        The model class if found, None otherwise.
 
     This uses setuptools entry points for registration.
     """
-
-    entry_point_name = f"{theme}.{feature_type}"
-    try:
-        for entry_point in importlib.metadata.entry_points(group="overture.models"):
-            if entry_point.name == entry_point_name:
-                return cast(type[BaseModel], entry_point.load())
-    except Exception as e:
-        print(f"Warning: Could not load model {entry_point_name}: {e}")
-
-    return None
+    # Check all discovered models for a match
+    models = discover_models(namespace=namespace)
+    key = ModelKey(namespace=namespace, theme=theme, type=feature_type)
+    return models.get(key)

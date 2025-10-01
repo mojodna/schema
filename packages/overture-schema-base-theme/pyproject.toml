@@ -25,9 +25,9 @@ path = "src/overture/schema/base/__about__.py"
 packages = ["src/overture"]
 
 [project.entry-points."overture.models"]
-"base.bathymetry" = "overture.schema.base.bathymetry.models:Bathymetry"
-"base.infrastructure" = "overture.schema.base.infrastructure.models:Infrastructure"
-"base.land" = "overture.schema.base.land.models:Land"
-"base.land_cover" = "overture.schema.base.land_cover.models:LandCover"
-"base.land_use" = "overture.schema.base.land_use.models:LandUse"
-"base.water" = "overture.schema.base.water.models:Water"
+"overture:base:bathymetry" = "overture.schema.base.bathymetry.models:Bathymetry"
+"overture:base:infrastructure" = "overture.schema.base.infrastructure.models:Infrastructure"
+"overture:base:land" = "overture.schema.base.land.models:Land"
+"overture:base:land_cover" = "overture.schema.base.land_cover.models:LandCover"
+"overture:base:land_use" = "overture.schema.base.land_use.models:LandUse"
+"overture:base:water" = "overture.schema.base.water.models:Water"
