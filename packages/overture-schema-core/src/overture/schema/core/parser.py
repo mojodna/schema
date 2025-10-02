@@ -1,7 +1,7 @@
 from types import UnionType
 from typing import Any, cast
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from ._cache import get_type_adapter
 
@@ -49,5 +49,7 @@ def parse_feature(
             dict[str, Any],
             parsed_model.model_dump(exclude_unset=True, mode=mode, by_alias=True),
         )
+    except ValidationError as e:
+        raise e
     except Exception as e:
         raise ValueError(str(e)) from e

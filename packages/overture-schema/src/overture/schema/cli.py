@@ -3,14 +3,17 @@
 import inspect
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 import click
-from pydantic import BaseModel
+import yaml
+from pydantic import BaseModel, ValidationError
 from rich.console import Console
 from rich.text import Text
+from yamlcore import CoreLoader  # type: ignore
 
-from overture.schema import create_union_from_models
+from overture.schema import create_union_from_models, parse_feature
 from overture.schema.core.discovery import ModelKey, discover_models
 from overture.schema.core.json_schema import json_schema
 
@@ -34,20 +37,24 @@ def create_union_type_from_models(
 
 
 def resolve_types(
-    type_names: tuple[str, ...], theme_names: tuple[str, ...], use_overture_types: bool
+    use_overture_types: bool,
+    namespace: str | None,
+    theme_names: tuple[str, ...],
+    type_names: tuple[str, ...],
 ) -> Any:  # noqa: ANN401
     """Resolve CLI options into a model type suitable for parse_feature.
 
     Args:
-        type_names: List of type names from --type option
-        theme_names: List of theme names from --theme option
         use_overture_types: Boolean from --overture-types flag
+        namespace: Namespace to filter by (e.g., "overture", "annex")
+        theme_names: List of theme names from --theme option
+        type_names: List of type names from --type option
 
     Returns:
         Model type suitable for passing to parse_feature
     """
     # Discover all available models via entry points
-    all_models = discover_models()
+    all_models = discover_models(namespace=namespace)
 
     # Filter models based on CLI options
     filtered_models = {}
@@ -91,7 +98,123 @@ def cli() -> None:
     pass
 
 
+def flatten_geojson(_feature: dict[str, Any]) -> dict[str, Any]:
+    """Create a variant of the feature with flat/Parquet-style structure.
+
+    Args:
+        feature: Feature dict in GeoJSON or flat format
+
+    Returns:
+        Feature dict in flat format
+    """
+    feature = _feature.copy()
+
+    # Check if this is GeoJSON format that needs flattening
+    if "properties" in feature and feature.get("type") == "Feature":
+        # Flatten GeoJSON feature to match GeoParquet structure
+        feature.update(feature["properties"])
+        del feature["properties"]
+        # Remove the GeoJSON "type": "Feature" field
+        if feature.get("type") == "Feature":
+            del feature["type"]
+
+    return feature
+
+
+def filter_tagged_union_from_path(loc: tuple[str | int, ...]) -> list[str | int]:
+    """Filter out tagged-union noise from validation error path.
+
+    Args:
+        loc: Tuple of path components from Pydantic validation error
+
+    Returns:
+        List of path components with tagged-union elements removed
+    """
+    filtered_loc: list[str | int] = []
+    for part in loc:
+        # Skip tagged-union[...] elements
+        if isinstance(part, str) and part.startswith("tagged-union["):
+            continue
+        else:
+            filtered_loc.append(part)
+    return filtered_loc
+
+
+def format_path(filtered_loc: list[str | int]) -> str:
+    """Convert filtered location path to dot-separated string.
+
+    Args:
+        filtered_loc: List of path components (strings and integers)
+
+    Returns:
+        Formatted path string (e.g., "properties.name" or "items[0].value")
+    """
+    path_str = ""
+    for i, part in enumerate(filtered_loc):
+        if isinstance(part, str):
+            if i > 0:
+                path_str += "."
+            path_str += part
+        else:
+            path_str += f"[{part}]"
+
+    if not path_str:
+        path_str = "(root)"
+
+    return path_str
+
+
+def format_validation_error(error: Any, console: Console) -> None:  # noqa: ANN401
+    """Format and print a single validation error.
+
+    Args:
+        error: Pydantic validation error dict
+        console: Rich Console instance for output
+    """
+    loc = error["loc"]
+
+    # Filter out tagged-union noise from the path
+    filtered_loc = filter_tagged_union_from_path(loc)
+
+    # Convert to dot-separated path
+    path_str = format_path(filtered_loc)
+
+    # Format the error message
+    msg = error["msg"]
+    input_value = error.get("input")
+
+    ctx = error.get("ctx", {})
+    if "error" in ctx:
+        msg = ctx["error"]
+        input_value = None
+
+    console.print(f"  {path_str}", style="cyan")
+    console.print(f"    → {msg}", style="yellow")
+
+    # Show input value if present and not too large
+    if input_value is not None:
+        value_str = (
+            repr(input_value)
+            if not isinstance(input_value, str)
+            else f"'{input_value}'"
+        )
+        prefix = "    → Got: "
+        if len(value_str) <= console.width - len(prefix):
+            console.print(f"{prefix}{value_str}", style="dim")
+    console.print()
+
+
 @cli.command()
+@click.argument("filename", type=click.Path(path_type=Path), required=False)
+@click.option(
+    "--overture-types",
+    is_flag=True,
+    help="Validate against all official Overture types (excludes extensions)",
+)
+@click.option(
+    "--namespace",
+    help="Namespace to filter by (e.g., overture, annex)",
+)
 @click.option(
     "--theme",
     multiple=True,
@@ -102,25 +225,73 @@ def cli() -> None:
     multiple=True,
     help="Specific type to validate against (e.g., building, segment)",
 )
-@click.option(
-    "--overture-types",
-    is_flag=True,
-    help="Validate against all official Overture types (excludes extensions)",
-)
 def validate(
-    type: tuple[str, ...], theme: tuple[str, ...], overture_types: bool
+    filename: Path | None,
+    overture_types: bool,
+    namespace: str | None,
+    theme: tuple[str, ...],
+    type: tuple[str, ...],
 ) -> None:
-    """Validate Overture Maps data against schemas."""
-    # TODO: Implement validation functionality
+    """Validate Overture Maps data against schemas.
+
+    Read from FILENAME or stdin if FILENAME is '-' or not provided.
+    """
+    # Determine input source
+    use_stdin = filename is None or str(filename) == "-"
+    source_name = "<stdin>" if use_stdin else str(filename)
+
+    if not use_stdin and not filename.is_file():
+        stderr.print(f"Error: '{filename}' is not a file.")
+        sys.exit(1)
+
     try:
-        model_type = resolve_types(type, theme, overture_types)
-        stdout.print("Validate command - not yet implemented")
-        stdout.print(f"Model type resolved: {repr(model_type)}")
-    except ValueError as e:
-        click.echo(f"Error: {e}", err=True)
+        model_type = resolve_types(overture_types, namespace, theme, type)
+
+        # Read and parse the YAML/JSON input
+        # Use YAML-1.2-compliant loader (YAML-1.2 dropped support for yes/no boolean values)
+        if use_stdin:
+            data = yaml.load(sys.stdin, Loader=CoreLoader)
+        else:
+            with filename.open("r", encoding="utf-8") as f:
+                data = yaml.load(f, Loader=CoreLoader)
+
+        # Convert from GeoJSON to flat format if necessary
+        if data["type"] == "Feature":
+            data = flatten_geojson(data)
+
+        # Validate using parse_feature
+        parse_feature(data, model_type)
+
+        stdout.print(f"✓ Successfully validated {source_name}")
+
+    except yaml.YAMLError as e:
+        stderr.print(f"Error: '{source_name}' contains invalid input: {e}")
+        sys.exit(1)
+
+    except ValidationError as e:
+        stderr.print("Validation failed:", style="red")
+        stderr.print()
+
+        for error in e.errors():
+            format_validation_error(error, stderr)
+
+        sys.exit(1)
+
+    except Exception as e:
+        stderr.print(f"Error: Unexpected error processing '{source_name}': {e}")
+        sys.exit(1)
 
 
 @cli.command("json-schema")
+@click.option(
+    "--overture-types",
+    is_flag=True,
+    help="Generate schema for all official Overture types (excludes extensions)",
+)
+@click.option(
+    "--namespace",
+    help="Namespace to filter by (e.g., overture, annex)",
+)
 @click.option(
     "--theme",
     multiple=True,
@@ -131,17 +302,15 @@ def validate(
     multiple=True,
     help="Specific type to generate schema for (e.g., building, segment)",
 )
-@click.option(
-    "--overture-types",
-    is_flag=True,
-    help="Generate schema for all official Overture types (excludes extensions)",
-)
 def json_schema_command(
-    type: tuple[str, ...], theme: tuple[str, ...], overture_types: bool
+    overture_types: bool,
+    namespace: str | None,
+    theme: tuple[str, ...],
+    type: tuple[str, ...],
 ) -> None:
     """Generate JSON schema for Overture Maps types."""
     try:
-        model_type = resolve_types(type, theme, overture_types)
+        model_type = resolve_types(overture_types, namespace, theme, type)
         schema = json_schema(model_type)
         # Use plain print for JSON output to avoid Rich formatting
         print(json.dumps(schema, indent=2, sort_keys=True))
