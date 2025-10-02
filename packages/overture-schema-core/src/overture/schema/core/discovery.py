@@ -1,6 +1,5 @@
 import importlib.metadata
 from dataclasses import dataclass
-from typing import cast
 
 from pydantic import BaseModel
 
@@ -13,11 +12,13 @@ class ModelKey:
         namespace: The namespace (e.g., "overture", "annex")
         theme: The theme name (e.g., "buildings", "places"), or None for non-themed models
         type: The feature type (e.g., "building", "place")
+        class_name: The fully qualified class name from the entry point value
     """
 
     namespace: str
     theme: str | None
     type: str
+    class_name: str
 
 
 def discover_models(
@@ -63,7 +64,12 @@ def discover_models(
 
             try:
                 model_class = entry_point.load()
-                key = ModelKey(namespace=ns, theme=theme, type=feature_type)
+                key = ModelKey(
+                    namespace=ns,
+                    theme=theme,
+                    type=feature_type,
+                    class_name=entry_point.value,
+                )
                 models[key] = model_class
             except Exception as e:
                 # Log warning but don't fail for individual models
@@ -91,5 +97,12 @@ def get_registered_model(
     """
     # Check all discovered models for a match
     models = discover_models(namespace=namespace)
-    key = ModelKey(namespace=namespace, theme=theme, type=feature_type)
-    return models.get(key)
+    # Need to find by namespace/theme/type, not exact key match
+    for key, model_class in models.items():
+        if (
+            key.namespace == namespace
+            and key.theme == theme
+            and key.type == feature_type
+        ):
+            return model_class
+    return None
