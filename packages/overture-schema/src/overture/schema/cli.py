@@ -13,9 +13,10 @@ from rich.console import Console
 from rich.text import Text
 from yamlcore import CoreLoader  # type: ignore
 
-from overture.schema import create_union_from_models, parse_feature
+from overture.schema import create_union_from_models
 from overture.schema.core.discovery import ModelKey, discover_models
 from overture.schema.core.json_schema import json_schema
+from overture.schema.core.parser import validate_feature, validate_features
 
 # Create a console instances for rich output
 stdout = Console()
@@ -170,6 +171,19 @@ def format_validation_error(error: Any, console: Console) -> None:  # noqa: ANN4
     Args:
         error: Pydantic validation error dict
         console: Rich Console instance for output
+
+    TODO: Add optional Rich Table display for errors (--show-table flag)
+        - Show the feature data that failed validation
+        - Highlight the problematic fields
+        - Makes debugging easier for lists of features
+
+    TODO: Use error path to navigate back into original input data
+        - Parse error path (e.g., [1].properties.name)
+        - Navigate to that location in original input
+        - Detect and drop discriminator elements (like tagged-union[...])
+        - Extract exact problematic value from original input
+        - Reuse this logic for Rich Table highlighting
+        - Improves error messages with precise context
     """
     loc = error["loc"]
 
@@ -255,12 +269,16 @@ def validate(
             with filename.open("r", encoding="utf-8") as f:
                 data = yaml.load(f, Loader=CoreLoader)
 
-        # Convert from GeoJSON to flat format if necessary
-        if data["type"] == "Feature":
-            data = flatten_geojson(data)
-
-        # Validate using parse_feature
-        parse_feature(data, model_type)
+        # Validate based on input type
+        if isinstance(data, list):
+            # List of features
+            validate_features(data, model_type)
+        elif isinstance(data, dict) and data.get("type") == "FeatureCollection":
+            # GeoJSON FeatureCollection
+            validate_features(data["features"], model_type)
+        else:
+            # Single feature
+            validate_feature(data, model_type)
 
         stdout.print(f"✓ Successfully validated {source_name}")
 

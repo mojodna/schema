@@ -127,6 +127,68 @@ properties:
 
 
 @pytest.fixture
+def feature_list_yaml_content() -> str:
+    """Return YAML content for a list of valid features."""
+    return """- id: test1
+  type: Feature
+  geometry:
+    type: Polygon
+    coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+  properties:
+    theme: buildings
+    type: building
+    version: 0
+- id: test2
+  type: Feature
+  geometry:
+    type: Polygon
+    coordinates: [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
+  properties:
+    theme: buildings
+    type: building
+    version: 0
+"""
+
+
+@pytest.fixture
+def feature_list_yaml(
+    cli_runner: CliRunner,
+    feature_list_yaml_content: str,  # noqa: ARG001
+) -> str:
+    """Create a feature-list.yaml file with a list of features."""
+    filename = "feature-list.yaml"
+    with open(filename, "w") as f:
+        f.write(feature_list_yaml_content)
+    return filename
+
+
+@pytest.fixture
+def feature_list_with_error_yaml(cli_runner: CliRunner) -> str:  # noqa: ARG001
+    """Create a feature-list-error.yaml file with a list where one feature is invalid."""
+    filename = "feature-list-error.yaml"
+    with open(filename, "w") as f:
+        f.write("""- id: test1
+  type: Feature
+  geometry:
+    type: Polygon
+    coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+  properties:
+    theme: buildings
+    type: building
+    version: 0
+- type: Feature
+  geometry:
+    type: Polygon
+    coordinates: [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
+  properties:
+    theme: buildings
+    type: building
+    version: 0
+""")
+    return filename
+
+
+@pytest.fixture
 def stderr_buffer() -> Generator[StringIO]:
     """Provide a patched stderr buffer for capturing CLI error output."""
 
@@ -430,3 +492,189 @@ def test_validate_stdin_with_error(
     assert result.exit_code == 1
     stderr_output = stderr_buffer.getvalue()
     assert "Validation failed:" in stderr_output
+
+
+def test_validate_feature_list_success(
+    cli_runner: CliRunner, feature_list_yaml: str
+) -> None:
+    """Test that validation succeeds for a list of valid features."""
+    result = cli_runner.invoke(cli, ["validate", feature_list_yaml])
+    assert result.exit_code == 0
+    assert "✓ Successfully validated" in result.output
+    assert feature_list_yaml in result.output
+
+
+def test_validate_feature_list_with_error(
+    cli_runner: CliRunner, feature_list_with_error_yaml: str, stderr_buffer: StringIO
+) -> None:
+    """Test that validation fails appropriately for a list with an invalid feature."""
+    result = cli_runner.invoke(cli, ["validate", feature_list_with_error_yaml])
+    assert result.exit_code == 1
+    stderr_output = stderr_buffer.getvalue()
+    assert "Validation failed:" in stderr_output
+    # Should indicate which item in the list failed (item 1, 0-indexed)
+    assert "[1]" in stderr_output or "item 1" in stderr_output.lower()
+
+
+def test_validate_feature_list_from_stdin(
+    cli_runner: CliRunner, feature_list_yaml_content: str
+) -> None:
+    """Test validation of a list of features from stdin."""
+    result = cli_runner.invoke(cli, ["validate"], input=feature_list_yaml_content)
+    assert result.exit_code == 0
+    assert "✓ Successfully validated <stdin>" in result.output
+
+
+@pytest.fixture
+def feature_collection_yaml(cli_runner: CliRunner) -> str:  # noqa: ARG001
+    """Create a feature-collection.yaml file with valid FeatureCollection."""
+    filename = "feature-collection.yaml"
+    with open(filename, "w") as f:
+        f.write("""{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "id": "test1",
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+      },
+      "properties": {
+        "theme": "buildings",
+        "type": "building",
+        "version": 0
+      }
+    },
+    {
+      "id": "test2",
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
+      },
+      "properties": {
+        "theme": "buildings",
+        "type": "building",
+        "version": 0
+      }
+    }
+  ]
+}
+""")
+    return filename
+
+
+@pytest.fixture
+def feature_collection_with_error_yaml(cli_runner: CliRunner) -> str:  # noqa: ARG001
+    """Create a FeatureCollection where second feature is missing id."""
+    filename = "feature-collection-error.yaml"
+    with open(filename, "w") as f:
+        f.write("""{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "id": "test1",
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+      },
+      "properties": {
+        "theme": "buildings",
+        "type": "building",
+        "version": 0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
+      },
+      "properties": {
+        "theme": "buildings",
+        "type": "building",
+        "version": 0
+      }
+    }
+  ]
+}
+""")
+    return filename
+
+
+@pytest.fixture
+def feature_collection_all_invalid_yaml(cli_runner: CliRunner) -> str:  # noqa: ARG001
+    """Create a FeatureCollection where all features are invalid."""
+    filename = "feature-collection-all-invalid.yaml"
+    with open(filename, "w") as f:
+        f.write("""{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+      },
+      "properties": {
+        "theme": "buildings",
+        "type": "building",
+        "version": 0
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
+      },
+      "properties": {
+        "theme": "buildings",
+        "type": "building",
+        "version": 0
+      }
+    }
+  ]
+}
+""")
+    return filename
+
+
+def test_validate_feature_collection_success(
+    cli_runner: CliRunner, feature_collection_yaml: str
+) -> None:
+    """Test that validation succeeds for a valid FeatureCollection."""
+    result = cli_runner.invoke(cli, ["validate", feature_collection_yaml])
+    assert result.exit_code == 0
+    assert "✓ Successfully validated" in result.output
+    assert feature_collection_yaml in result.output
+
+
+def test_validate_feature_collection_with_error(
+    cli_runner: CliRunner,
+    feature_collection_with_error_yaml: str,
+    stderr_buffer: StringIO,
+) -> None:
+    """Test that validation fails for FeatureCollection with one invalid feature."""
+    result = cli_runner.invoke(cli, ["validate", feature_collection_with_error_yaml])
+    assert result.exit_code == 1
+    stderr_output = stderr_buffer.getvalue()
+    assert "Validation failed:" in stderr_output
+    # Should indicate which item in the features list failed (item 1, 0-indexed)
+    assert "[1]" in stderr_output or "item 1" in stderr_output.lower()
+
+
+def test_validate_feature_collection_all_invalid(
+    cli_runner: CliRunner,
+    feature_collection_all_invalid_yaml: str,
+    stderr_buffer: StringIO,
+) -> None:
+    """Test that validation shows errors for all invalid features in FeatureCollection."""
+    result = cli_runner.invoke(cli, ["validate", feature_collection_all_invalid_yaml])
+    assert result.exit_code == 1
+    stderr_output = stderr_buffer.getvalue()
+    assert "Validation failed:" in stderr_output
+    # Should show errors for both features
+    assert "[0]" in stderr_output or "[1]" in stderr_output

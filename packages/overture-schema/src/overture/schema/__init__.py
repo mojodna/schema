@@ -5,6 +5,11 @@ from typing import Any
 from overture.schema.core import parse_feature
 from overture.schema.core.discovery import discover_models
 from overture.schema.core.json_schema import json_schema
+from overture.schema.core.parser import (
+    parse_features,
+    validate_feature,
+    validate_features,
+)
 from overture.schema.core.unions import create_union_from_models
 
 
@@ -32,5 +37,8 @@ def parse(feature: dict[str, Any], mode: str = "json") -> dict[str, Any] | None:
 __all__ = [
     "parse",
     "parse_feature",
+    "parse_features",
+    "validate_feature",
+    "validate_features",
     "json_schema",
 ]
