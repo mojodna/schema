@@ -8,6 +8,7 @@ import pytest
 from click.testing import CliRunner
 from overture.schema.cli.commands import cli
 from overture.schema.cli.error_formatting import (
+    format_path,
     group_errors_by_discriminator,
     select_most_likely_errors,
 )
@@ -80,9 +81,12 @@ properties:
             error_counts = {k: len(v) for k, v in groups.items()}
             if len(set(error_counts.values())) == 1 and len(groups) > 1:
                 # We have a tie!
-                selected, is_tied = select_most_likely_errors(groups)
+                selected, is_tied, is_heterogeneous, item_types = (
+                    select_most_likely_errors(groups)
+                )
                 assert len(selected) > 0, "Should select errors even in a tie"
                 assert is_tied, "Should indicate that there was a tie"
+                assert not is_heterogeneous, "Single item should not be heterogeneous"
 
                 # Should return errors from ALL tied groups
                 total_expected = sum(len(v) for v in groups.values())
@@ -92,7 +96,9 @@ properties:
 
                 # Run it multiple times to verify deterministic behavior
                 for _ in range(5):
-                    selected_again, is_tied_again = select_most_likely_errors(groups)
+                    selected_again, is_tied_again, is_het_again, _ = (
+                        select_most_likely_errors(groups)
+                    )
                     assert selected == selected_again, (
                         "Selection should be deterministic"
                     )
@@ -101,7 +107,9 @@ properties:
                     )
             else:
                 # Not a tie in this case, just verify it doesn't indicate a tie
-                selected, is_tied = select_most_likely_errors(groups)
+                selected, is_tied, is_heterogeneous, item_types = (
+                    select_most_likely_errors(groups)
+                )
                 assert not is_tied or len(groups) <= 1, (
                     "Should not indicate tie when error counts differ"
                 )
@@ -183,3 +191,29 @@ properties:
         assert "ambiguous" not in stderr_output.lower()
         # Should show the missing 'id' error
         assert "id" in stderr_output.lower()
+
+
+class TestFormatPath:
+    """Tests for format_path function."""
+
+    @pytest.mark.parametrize(
+        "filtered_loc,expected_output",
+        [
+            pytest.param([], "(root)", id="empty_path"),
+            pytest.param(["id"], "id", id="single_field"),
+            pytest.param(["properties", "name"], "properties.name", id="nested_field"),
+            pytest.param([0], "[0]", id="list_index"),
+            pytest.param([0, "id"], "[0].id", id="list_then_field"),
+            pytest.param(
+                ["features", 1, "properties"], "features[1].properties", id="mixed_path"
+            ),
+            pytest.param([0, 1, 2], "[0][1][2]", id="nested_list_indices"),
+            pytest.param(["a", "b", "c", "d"], "a.b.c.d", id="deep_nested_fields"),
+        ],
+    )
+    def test_format_path_variations(
+        self, filtered_loc: list[str | int], expected_output: str
+    ) -> None:
+        """Test format_path with various input patterns."""
+        result = format_path(filtered_loc)
+        assert result == expected_output

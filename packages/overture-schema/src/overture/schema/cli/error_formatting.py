@@ -2,13 +2,15 @@
 
 from typing import Any
 
+from pydantic import BaseModel
 from rich.console import Console
 
 from .type_analysis import (
     UnionMetadata,
     create_structural_tuple,
     extract_discriminator_path,
-    introspect_union,
+    get_item_index,
+    infer_model_from_error,
 )
 
 
@@ -44,9 +46,65 @@ def group_errors_by_discriminator(
     return groups
 
 
+def analyze_collection_heterogeneity(
+    errors: list[dict[str, Any]],
+    metadata: UnionMetadata,
+) -> tuple[dict[int, type[BaseModel] | None], bool]:
+    """Analyze a collection to detect type heterogeneity.
+
+    Args:
+        errors: List of Pydantic validation error dicts
+        metadata: Pre-computed UnionMetadata from introspect_union()
+
+    Returns:
+        Tuple of (item_types, is_heterogeneous) where:
+        - item_types: Dict mapping item index to inferred model type
+        - is_heterogeneous: True if collection contains multiple model types
+    """
+    # Group errors by item index
+    item_errors: dict[int | None, list[dict[str, Any]]] = {}
+    for error in errors:
+        item_idx = get_item_index(error["loc"])
+        if item_idx not in item_errors:
+            item_errors[item_idx] = []
+        item_errors[item_idx].append(error)
+
+    # Infer the most likely type for each item
+    # Use heuristic: type with FEWEST errors is most likely correct
+    item_types: dict[int, type[BaseModel] | None] = {}
+    for item_idx, item_error_list in item_errors.items():
+        if item_idx is None:
+            continue
+
+        # Group this item's errors by inferred type
+        errors_by_type: dict[type[BaseModel], list[dict[str, Any]]] = {}
+        for error in item_error_list:
+            inferred_type = infer_model_from_error(error, metadata)
+            if inferred_type is not None:
+                if inferred_type not in errors_by_type:
+                    errors_by_type[inferred_type] = []
+                errors_by_type[inferred_type].append(error)
+
+        if errors_by_type:
+            # Select the type with the FEWEST errors (smallest edit distance)
+            item_types[item_idx] = min(
+                errors_by_type.keys(), key=lambda t: len(errors_by_type[t])
+            )
+        else:
+            item_types[item_idx] = None
+
+    # Check if the collection is heterogeneous
+    unique_types = set(t for t in item_types.values() if t is not None)
+    is_heterogeneous = len(unique_types) > 1
+
+    return item_types, is_heterogeneous
+
+
 def select_most_likely_errors(
     error_groups: dict[tuple[str | int, ...], list[dict[str, Any]]],
-) -> tuple[list[dict[str, Any]], bool]:
+    metadata: UnionMetadata | None = None,
+    all_errors: list[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], bool, bool, dict[int, type[BaseModel] | None]]:
     """Select the error group(s) most likely to be the intended model.
 
     Uses heuristic: the group with the fewest errors is most likely correct,
@@ -55,16 +113,47 @@ def select_most_likely_errors(
     When multiple groups have the same minimum error count (a tie), returns
     all tied groups to indicate ambiguity to the user.
 
+    For heterogeneous collections, returns ALL errors since different items
+    may have different intended types.
+
     Args:
         error_groups: Dictionary mapping discriminator paths to error lists
+        metadata: Optional UnionMetadata for heterogeneity detection
+        all_errors: Optional list of all errors for heterogeneity analysis
 
     Returns:
-        Tuple of (errors_list, is_tied) where:
-        - errors_list: Flattened list of errors from all tied groups
+        Tuple of (errors_list, is_tied, is_heterogeneous, item_types) where:
+        - errors_list: List of errors to display
         - is_tied: True if multiple groups had the same minimum error count
+        - is_heterogeneous: True if collection contains multiple model types
+        - item_types: Dict mapping item index to inferred model type
     """
     if not error_groups:
-        return [], False
+        return [], False, False, {}
+
+    # Check for heterogeneous collections
+    is_heterogeneous = False
+    _item_types: dict[int, type[BaseModel] | None] = {}
+    if metadata is not None and all_errors is not None:
+        _item_types, is_heterogeneous = analyze_collection_heterogeneity(
+            all_errors, metadata
+        )
+
+    # For heterogeneous collections, return only errors matching each item's inferred type
+    if is_heterogeneous:
+        filtered_errors = []
+        for error in all_errors:
+            item_idx = get_item_index(error["loc"])
+            if item_idx is not None and item_idx in _item_types:
+                # Only include this error if it matches the inferred type for this item
+                error_type = infer_model_from_error(error, metadata)
+                if error_type == _item_types[item_idx]:
+                    filtered_errors.append(error)
+            else:
+                # Non-list errors or items without inferred type - include them
+                filtered_errors.append(error)
+
+        return filtered_errors, False, True, _item_types
 
     # Find the minimum error count
     min_error_count = min(len(errors) for errors in error_groups.values())
@@ -75,12 +164,12 @@ def select_most_likely_errors(
     ]
 
     # Flatten all errors from tied groups
-    all_errors = [error for group in tied_groups for error in group]
+    flattened_errors = [error for group in tied_groups for error in group]
 
     # Indicate if there was a tie
     is_tied = len(tied_groups) > 1
 
-    return all_errors, is_tied
+    return flattened_errors, is_tied, is_heterogeneous, _item_types
 
 
 def format_path(filtered_loc: list[str | int]) -> str:
@@ -112,6 +201,8 @@ def format_validation_error(
     console: Console,
     metadata: UnionMetadata | None = None,
     show_model_hint: bool = False,
+    item_type: type[BaseModel] | None = None,
+    show_item_type: bool = False,
 ) -> None:
     """Format and print a single validation error.
 
@@ -120,6 +211,8 @@ def format_validation_error(
         console: Rich Console instance for output
         metadata: Pre-computed UnionMetadata from introspect_union() (optional)
         show_model_hint: Show which model was selected for validation (first error only)
+        item_type: The inferred type for this item (always provided if available)
+        show_item_type: Whether to display the item type in the path (True for heterogeneous collections)
 
     TODO: Add optional Rich Table display for errors (--show-table flag)
         - Show the feature data that failed validation
@@ -172,6 +265,10 @@ def format_validation_error(
 
     # Convert to dot-separated path
     path_str = format_path(filtered_loc)
+
+    # Add item type annotation if requested (for heterogeneous collections)
+    if show_item_type and item_type is not None:
+        path_str = f"{path_str} [dim]({item_type.__name__})[/dim]"
 
     # Show model hint if this is the first error in a group
     if selected_model is not None:

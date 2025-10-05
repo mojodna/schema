@@ -54,16 +54,6 @@ class TestValidateCommand:
         assert result.exit_code == 0
         assert "Successfully validated" in result.output
 
-    def test_validate_success_message(
-        self, cli_runner: CliRunner, building_feature_yaml_content: str
-    ) -> None:
-        """Test that validation shows success message for valid input."""
-        result = cli_runner.invoke(
-            cli, ["validate"], input=building_feature_yaml_content
-        )
-        assert result.exit_code == 0
-        assert "Successfully validated <stdin>" in result.output
-
     def test_validate_flat_format_input(self, cli_runner: CliRunner) -> None:
         """Test that validation works with flat (non-GeoJSON) format."""
         flat_yaml = """
@@ -153,42 +143,47 @@ properties:
         result = cli_runner.invoke(cli, ["validate"], input=nested_field_yaml)
         assert result.exit_code == 1
 
-    def test_validate_stdin_with_no_argument(
-        self, cli_runner: CliRunner, building_feature_yaml_content: str
-    ) -> None:
-        """Test validating from stdin when no filename is provided."""
-        result = cli_runner.invoke(
-            cli, ["validate"], input=building_feature_yaml_content
-        )
-        assert result.exit_code == 0
-        assert "Successfully validated <stdin>" in result.output
-
-    def test_validate_stdin_with_dash_argument(
-        self, cli_runner: CliRunner, building_feature_yaml_content: str
-    ) -> None:
-        """Test validating from stdin using '-' as filename."""
-        result = cli_runner.invoke(
-            cli, ["validate", "-"], input=building_feature_yaml_content
-        )
-        assert result.exit_code == 0
-        assert "Successfully validated <stdin>" in result.output
-
-    def test_validate_stdin_with_error(
+    @pytest.mark.parametrize(
+        "filename_arg",
+        [
+            pytest.param(None, id="no_argument"),
+            pytest.param("-", id="dash_argument"),
+        ],
+    )
+    def test_validate_stdin_with_different_args(
         self,
         cli_runner: CliRunner,
-        missing_id_yaml_content: str,
-        stderr_buffer: StringIO,
+        building_feature_yaml_content: str,
+        filename_arg: str | None,
     ) -> None:
-        """Test that validation errors from stdin are shown correctly."""
-        result = cli_runner.invoke(cli, ["validate"], input=missing_id_yaml_content)
-        assert result.exit_code == 1
+        """Test validating from stdin with different argument forms."""
+        args = ["validate"]
+        if filename_arg is not None:
+            args.append(filename_arg)
 
-        stderr_output = stderr_buffer.getvalue()
-        assert "Validation failed" in stderr_output
+        result = cli_runner.invoke(cli, args, input=building_feature_yaml_content)
+        assert result.exit_code == 0
+        assert "Successfully validated <stdin>" in result.output
 
-    def test_validate_feature_list_success(self, cli_runner: CliRunner) -> None:
-        """Test validation of a list of features."""
-        feature_list = """
+    @pytest.mark.parametrize(
+        "has_error,expected_exit_code,check_index",
+        [
+            pytest.param(False, 0, False, id="success"),
+            pytest.param(True, 1, True, id="with_error"),
+        ],
+    )
+    def test_validate_feature_list(
+        self,
+        cli_runner: CliRunner,
+        stderr_buffer: StringIO,
+        has_error: bool,
+        expected_exit_code: int,
+        check_index: bool,
+    ) -> None:
+        """Test validation of a list of features (success and error cases)."""
+        # Second feature conditionally includes 'id' field
+        id_field = "" if has_error else "id: test2"
+        feature_list = f"""
 - id: test1
   type: Feature
   geometry:
@@ -198,7 +193,7 @@ properties:
     theme: buildings
     type: building
     version: 0
-- id: test2
+- {id_field}
   type: Feature
   geometry:
     type: Polygon
@@ -209,72 +204,39 @@ properties:
     version: 0
 """
         result = cli_runner.invoke(cli, ["validate"], input=feature_list)
-        assert result.exit_code == 0
-        assert "Successfully validated <stdin>" in result.output
+        assert result.exit_code == expected_exit_code
 
-    def test_validate_feature_list_with_error(
+        if check_index:
+            stderr_output = stderr_buffer.getvalue()
+            # Should show list index for the second feature
+            assert "[1]" in stderr_output or "1" in stderr_output
+        else:
+            assert "Successfully validated <stdin>" in result.output
+
+    @pytest.mark.parametrize(
+        "first_feature_valid,second_feature_valid,expected_exit_code",
+        [
+            pytest.param(True, True, 0, id="both_valid"),
+            pytest.param(True, False, 1, id="second_invalid"),
+            pytest.param(False, False, 1, id="both_invalid"),
+        ],
+    )
+    def test_validate_feature_collection(
         self,
         cli_runner: CliRunner,
         stderr_buffer: StringIO,
+        first_feature_valid: bool,
+        second_feature_valid: bool,
+        expected_exit_code: int,
     ) -> None:
-        """Test validation error in feature list shows the list index."""
-        feature_list_with_error = """
-- id: test1
-  type: Feature
-  geometry:
-    type: Polygon
-    coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
-  properties:
-    theme: buildings
-    type: building
-    version: 0
-- type: Feature
-  geometry:
-    type: Polygon
-    coordinates: [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
-  properties:
-    theme: buildings
-    type: building
-    version: 0
-"""
-        result = cli_runner.invoke(cli, ["validate"], input=feature_list_with_error)
-        assert result.exit_code == 1
+        """Test validation of a GeoJSON FeatureCollection with various validity states."""
+        first_id = "id: test1" if first_feature_valid else ""
+        second_id = "id: test2" if second_feature_valid else ""
 
-        stderr_output = stderr_buffer.getvalue()
-        # Should show list index for the second feature
-        assert "[1]" in stderr_output or "1" in stderr_output
-
-    def test_validate_feature_list_from_stdin(self, cli_runner: CliRunner) -> None:
-        """Test validation of feature list from stdin."""
-        yaml_content = """
-- id: test1
-  type: Feature
-  geometry:
-    type: Polygon
-    coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
-  properties:
-    theme: buildings
-    type: building
-    version: 0
-- id: test2
-  type: Feature
-  geometry:
-    type: Polygon
-    coordinates: [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
-  properties:
-    theme: buildings
-    type: building
-    version: 0
-"""
-        result = cli_runner.invoke(cli, ["validate"], input=yaml_content)
-        assert result.exit_code == 0
-
-    def test_validate_feature_collection_success(self, cli_runner: CliRunner) -> None:
-        """Test validation of a GeoJSON FeatureCollection."""
-        feature_collection = """
+        feature_collection = f"""
 type: FeatureCollection
 features:
-  - id: test1
+  - {first_id}
     type: Feature
     geometry:
       type: Polygon
@@ -283,7 +245,7 @@ features:
       theme: buildings
       type: building
       version: 0
-  - id: test2
+  - {second_id}
     type: Feature
     geometry:
       type: Polygon
@@ -294,69 +256,13 @@ features:
       version: 0
 """
         result = cli_runner.invoke(cli, ["validate"], input=feature_collection)
-        assert result.exit_code == 0
-        assert "Successfully validated <stdin>" in result.output
+        assert result.exit_code == expected_exit_code
 
-    def test_validate_feature_collection_with_error(
-        self, cli_runner: CliRunner, stderr_buffer: StringIO
-    ) -> None:
-        """Test validation error in FeatureCollection."""
-        feature_collection_error = """
-type: FeatureCollection
-features:
-  - id: test1
-    type: Feature
-    geometry:
-      type: Polygon
-      coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
-    properties:
-      theme: buildings
-      type: building
-      version: 0
-  - type: Feature
-    geometry:
-      type: Polygon
-      coordinates: [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
-    properties:
-      theme: buildings
-      type: building
-      version: 0
-"""
-        result = cli_runner.invoke(cli, ["validate"], input=feature_collection_error)
-        assert result.exit_code == 1
-
-        stderr_output = stderr_buffer.getvalue()
-        assert "Validation failed" in stderr_output
-
-    def test_validate_feature_collection_all_invalid(
-        self, cli_runner: CliRunner, stderr_buffer: StringIO
-    ) -> None:
-        """Test validation when all features in FeatureCollection are invalid."""
-        feature_collection_all_invalid = """
-type: FeatureCollection
-features:
-  - type: Feature
-    geometry:
-      type: Polygon
-      coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
-    properties:
-      theme: buildings
-      type: building
-      version: 0
-  - type: Feature
-    geometry:
-      type: Polygon
-      coordinates: [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
-    properties:
-      theme: buildings
-      type: building
-      version: 0
-"""
-        result = cli_runner.invoke(
-            cli, ["validate"], input=feature_collection_all_invalid
-        )
-        assert result.exit_code == 1
-
-        stderr_output = stderr_buffer.getvalue()
-        # Should show errors for list items
-        assert "[0]" in stderr_output or "[1]" in stderr_output
+        if expected_exit_code == 0:
+            assert "Successfully validated <stdin>" in result.output
+        else:
+            stderr_output = stderr_buffer.getvalue()
+            assert "Validation failed" in stderr_output
+            # Should show errors for list items
+            if not first_feature_valid or not second_feature_valid:
+                assert "[0]" in stderr_output or "[1]" in stderr_output

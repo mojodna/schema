@@ -194,6 +194,60 @@ def create_structural_tuple(
     return tuple(structural)
 
 
+def get_item_index(loc: tuple[str | int, ...]) -> int | None:
+    """Extract the top-level list index from an error location, if present.
+
+    Args:
+        loc: The location tuple from a Pydantic validation error
+
+    Returns:
+        The list index if the error is within a list item, otherwise None
+    """
+    if loc and isinstance(loc[0], int):
+        return loc[0]
+    return None
+
+
+def infer_model_from_error(
+    error: dict[str, Any],
+    metadata: UnionMetadata,
+) -> type[BaseModel] | None:
+    """Infer the model type that an error is associated with.
+
+    Uses the LAST (most specific) discriminator or model name found in the
+    error path, as nested unions may have multiple discriminators.
+
+    Args:
+        error: Pydantic validation error dict
+        metadata: Pre-computed UnionMetadata from introspect_union()
+
+    Returns:
+        The inferred model type, or None if it cannot be determined
+    """
+    loc = error["loc"]
+    try:
+        structural = create_structural_tuple(loc, metadata)
+
+        # Look for discriminator value or model name in the location path
+        # Use the LAST one found (most specific) rather than the first
+        inferred_model = None
+        for element, struct_type in zip(loc, structural, strict=False):
+            if struct_type == "discriminator" and isinstance(element, str):
+                model = metadata.discriminator_to_model.get(element)
+                if model is not None:
+                    inferred_model = model
+            elif struct_type == "model" and isinstance(element, str):
+                model = metadata.model_name_to_model.get(element)
+                if model is not None:
+                    inferred_model = model
+
+        return inferred_model
+    except Exception:
+        pass
+
+    return None
+
+
 def extract_discriminator_path(
     loc: tuple[str | int, ...],
     structural: tuple[StructuralElement, ...],
