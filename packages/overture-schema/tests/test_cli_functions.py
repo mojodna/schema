@@ -89,6 +89,58 @@ class TestLoadInput:
         assert len(data) == 2
         assert data[0]["id"] == "test1"
 
+    @pytest.mark.parametrize(
+        "extension",
+        [".txt", ".csv", ".xml", ".data", ""],
+    )
+    def test_load_input_warns_unexpected_extension(
+        self,
+        cli_runner: pytest.FixtureRequest,
+        capsys: pytest.CaptureFixture,
+        extension: str,
+    ) -> None:
+        """Test that load_input warns about unexpected file extensions.
+
+        Note: cli_runner provides isolated filesystem for test file creation.
+        """
+        filename = f"data{extension}"
+        with open(filename, "w") as f:
+            f.write(
+                '{"id": "test", "type": "Feature", "properties": {"type": "building"}}'
+            )
+
+        load_input(Path(filename))
+
+        captured = capsys.readouterr()
+        assert "Warning" in captured.err
+        assert "unexpected extension" in captured.err
+        assert filename in captured.err
+
+    @pytest.mark.parametrize(
+        "extension",
+        [".json", ".yaml", ".yml", ".geojson"],
+    )
+    def test_load_input_no_warning_expected_extension(
+        self,
+        cli_runner: pytest.FixtureRequest,
+        capsys: pytest.CaptureFixture,
+        extension: str,
+    ) -> None:
+        """Test that load_input does not warn for expected file extensions.
+
+        Note: cli_runner provides isolated filesystem for test file creation.
+        """
+        filename = f"data{extension}"
+        with open(filename, "w") as f:
+            f.write(
+                '{"id": "test", "type": "Feature", "properties": {"type": "building"}}'
+            )
+
+        load_input(Path(filename))
+
+        captured = capsys.readouterr()
+        assert captured.err == ""
+
 
 class TestPerformValidation:
     """Tests for perform_validation function.

@@ -139,6 +139,14 @@ def load_input(filename: Path | None) -> tuple[dict | list, str]:
     if not filename.is_file():
         raise click.UsageError(f"'{filename}' is not a file.")
 
+    # Warn about unexpected file extensions
+    if filename.suffix not in {".json", ".yaml", ".yml", ".geojson"}:
+        click.echo(
+            f"Warning: File '{filename}' has unexpected extension. "
+            f"Expecting .json, .yaml, .yml, or .geojson",
+            err=True,
+        )
+
     # Use YAML-1.2-compliant loader (YAML-1.2 dropped support for yes/no boolean values)
     with filename.open("r", encoding="utf-8") as f:
         data = yaml.load(f, Loader=CoreLoader)
