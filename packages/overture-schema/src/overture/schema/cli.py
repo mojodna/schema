@@ -3,12 +3,15 @@
 import inspect
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Annotated as AnnotatedType
+from typing import Any, Literal, get_args, get_origin
 
 import click
 import yaml
 from pydantic import BaseModel, ValidationError
+from pydantic.fields import FieldInfo
 from rich.console import Console
 from rich.text import Text
 from yamlcore import CoreLoader  # type: ignore
@@ -19,8 +22,8 @@ from overture.schema.core.json_schema import json_schema
 from overture.schema.core.parser import validate_feature, validate_features
 
 # Create a console instances for rich output
-stdout = Console()
-stderr = Console(file=sys.stderr)
+stdout = Console(highlight=False)
+stderr = Console(highlight=False, file=sys.stderr)
 
 
 def create_union_type_from_models(
@@ -92,6 +95,292 @@ def resolve_types(
     return create_union_type_from_models(filtered_models)
 
 
+# Type aliases for structural tuple elements
+StructuralElement = Literal["list_index", "union", "model", "discriminator", "field"]
+
+
+@dataclass
+class UnionMetadata:
+    """Metadata about a union type's structure."""
+
+    is_discriminated: bool
+    discriminator_field: str | None
+    # Map discriminator values to their corresponding model types
+    discriminator_to_model: dict[str, type[BaseModel]]
+    # Map model class names to their types (for non-discriminated unions)
+    model_name_to_model: dict[str, type[BaseModel]]
+    # Nested union metadata for union members that are themselves unions
+    nested_unions: dict[str, "UnionMetadata"]
+
+
+def introspect_union(union_type: Any) -> UnionMetadata:  # noqa: ANN401
+    """Introspect a union type to extract structural information.
+
+    Args:
+        union_type: A union type (may be Annotated with discriminator)
+
+    Returns:
+        UnionMetadata describing the structure of the union
+    """
+    # Check if this is a list type - unwrap to get the element type
+    origin = get_origin(union_type)
+    if origin is list:
+        args = get_args(union_type)
+        if args:
+            # Recursively introspect the list element type
+            return introspect_union(args[0])
+
+    # Check if this is an Annotated type with a discriminator
+    discriminator_field = None
+    actual_union = union_type
+
+    # Unwrap Annotated ONLY if the top level is Annotated
+    if origin is AnnotatedType:
+        # This is Annotated[Union[...], ...]
+        args = get_args(union_type)
+        if args:
+            # First arg is the actual type, rest are metadata
+            actual_union = args[0]
+            # Look for Field with discriminator in metadata
+            for metadata in args[1:]:
+                if isinstance(metadata, FieldInfo) and hasattr(
+                    metadata, "discriminator"
+                ):
+                    discriminator_field = metadata.discriminator
+                    break
+
+    # Get union members
+    union_origin = get_origin(actual_union)
+    if union_origin is None:
+        # Not a union, might be a single model
+        union_members = [actual_union]
+    else:
+        union_members = list(get_args(actual_union))
+
+    discriminator_to_model: dict[str, type[BaseModel]] = {}
+    model_name_to_model: dict[str, type[BaseModel]] = {}
+    nested_unions: dict[str, UnionMetadata] = {}
+
+    # Analyze each union member
+    for member in union_members:
+        # Check if member is itself annotated (nested discriminated union)
+        member_origin = get_origin(member)
+
+        # If it's an Annotated type, it might contain a discriminated union
+        if member_origin is AnnotatedType:
+            # Check if this is an Annotated with a discriminator
+            member_args = get_args(member)
+            if member_args:
+                # Check for Field with discriminator in the annotations
+                has_discriminator = False
+                for metadata in member_args[1:]:
+                    if isinstance(metadata, FieldInfo) and hasattr(
+                        metadata, "discriminator"
+                    ):
+                        has_discriminator = True
+                        break
+
+                if has_discriminator:
+                    # This is a nested discriminated union
+                    nested_metadata = introspect_union(member)
+                    nested_unions[str(member)] = nested_metadata
+                    # Also extract discriminator mappings from the nested union
+                    discriminator_to_model.update(
+                        nested_metadata.discriminator_to_model
+                    )
+                    continue
+
+                # Check if the inner type is a union (could be Union without Annotated)
+                inner_type = member_args[0]
+                if get_origin(inner_type) is not None:
+                    # Nested union without discriminator at this level
+                    nested_metadata = introspect_union(member)
+                    nested_unions[str(member)] = nested_metadata
+                    discriminator_to_model.update(
+                        nested_metadata.discriminator_to_model
+                    )
+                    continue
+
+        # It's a BaseModel
+        if inspect.isclass(member) and issubclass(member, BaseModel):
+            model_name_to_model[member.__name__] = member
+
+            # Extract discriminator values from ALL Literal fields (not just the current discriminator)
+            # This handles nested discriminators with different field names
+            for _field_name, field_info in member.model_fields.items():
+                annotation = field_info.annotation
+                literal_origin = get_origin(annotation)
+                if literal_origin is Literal:
+                    literal_args = get_args(annotation)
+                    if literal_args:
+                        disc_value = literal_args[0]
+                        discriminator_to_model[disc_value] = member
+
+    return UnionMetadata(
+        is_discriminated=discriminator_field is not None,
+        discriminator_field=discriminator_field,
+        discriminator_to_model=discriminator_to_model,
+        model_name_to_model=model_name_to_model,
+        nested_unions=nested_unions,
+    )
+
+
+def create_structural_tuple(
+    loc: tuple[str | int, ...],
+    union_type: Any,  # noqa: ANN401
+) -> tuple[StructuralElement, ...]:
+    """Create a structural tuple parallel to error['loc'] describing each element.
+
+    Args:
+        loc: The location tuple from a Pydantic validation error
+        union_type: The union type being validated against
+
+    Returns:
+        Tuple of same length as loc with structural labels for each element
+    """
+    metadata = introspect_union(union_type)
+    structural: list[StructuralElement] = []
+
+    i = 0
+    while i < len(loc):
+        element = loc[i]
+
+        # Check if it's a list index (integer)
+        if isinstance(element, int):
+            structural.append("list_index")
+            i += 1
+            continue
+
+        # Check if it's a union marker string
+        if isinstance(element, str) and element.startswith("tagged-union["):
+            structural.append("union")
+            i += 1
+            # After a union marker, expect discriminator value(s)
+            # Continue to identify following discriminator elements
+            continue
+
+        # Check if it's a model class name (non-discriminated union member)
+        if isinstance(element, str) and element in metadata.model_name_to_model:
+            structural.append("model")
+            i += 1
+            continue
+
+        # Check if it's a discriminator value (can come from nested unions)
+        if isinstance(element, str) and element in metadata.discriminator_to_model:
+            structural.append("discriminator")
+            i += 1
+            # After discriminator, might have more discriminators (nested) or fields
+            # Check if the selected model has nested unions
+            selected_model = metadata.discriminator_to_model[element]
+            # For now, assume next elements are either more discriminators or fields
+            continue
+
+        # Otherwise, it's a field name
+        structural.append("field")
+        i += 1
+
+    return tuple(structural)
+
+
+def extract_discriminator_path(
+    loc: tuple[str | int, ...],
+    structural: tuple[StructuralElement, ...],
+) -> tuple[str | int, ...]:
+    """Extract the discriminator path from a location tuple.
+
+    The discriminator path includes union markers, model names, and discriminator
+    values - everything up to (but not including) the first field. List indices are
+    excluded to prevent false ambiguity when validating lists of features.
+
+    Args:
+        loc: The location tuple from a Pydantic validation error
+        structural: The parallel structural tuple
+
+    Returns:
+        The discriminator path portion of the location tuple (excluding list_index)
+    """
+    discriminator_path = []
+    for element, struct_type in zip(loc, structural, strict=False):
+        if struct_type == "field":
+            # Stop at the first field
+            break
+        if struct_type != "list_index":
+            # Include everything except list indices
+            discriminator_path.append(element)
+    return tuple(discriminator_path)
+
+
+def group_errors_by_discriminator(
+    errors: list[dict[str, Any]],
+    model_type: Any,  # noqa: ANN401
+) -> dict[tuple[str | int, ...], list[dict[str, Any]]]:
+    """Group validation errors by their discriminator path.
+
+    Args:
+        errors: List of Pydantic validation error dicts
+        model_type: The union type being validated against
+
+    Returns:
+        Dictionary mapping discriminator paths to lists of errors
+    """
+    groups: dict[tuple[str | int, ...], list[dict[str, Any]]] = {}
+
+    for error in errors:
+        loc = error["loc"]
+        try:
+            structural = create_structural_tuple(loc, model_type)
+            disc_path = extract_discriminator_path(loc, structural)
+            if disc_path not in groups:
+                groups[disc_path] = []
+            groups[disc_path].append(error)
+        except Exception:
+            # If structural analysis fails, group under empty path
+            if () not in groups:
+                groups[()] = []
+            groups[()].append(error)
+
+    return groups
+
+
+def select_most_likely_errors(
+    error_groups: dict[tuple[str | int, ...], list[dict[str, Any]]],
+) -> tuple[list[dict[str, Any]], bool]:
+    """Select the error group(s) most likely to be the intended model.
+
+    Uses heuristic: the group with the fewest errors is most likely correct,
+    as it requires the fewest changes to make the data valid.
+
+    When multiple groups have the same minimum error count (a tie), returns
+    all tied groups to indicate ambiguity to the user.
+
+    Args:
+        error_groups: Dictionary mapping discriminator paths to error lists
+
+    Returns:
+        Tuple of (errors_list, is_tied) where:
+        - errors_list: Flattened list of errors from all tied groups
+        - is_tied: True if multiple groups had the same minimum error count
+    """
+    if not error_groups:
+        return [], False
+
+    # Find the minimum error count
+    min_error_count = min(len(errors) for errors in error_groups.values())
+
+    # Get all groups with the minimum error count
+    tied_groups = [
+        errors for errors in error_groups.values() if len(errors) == min_error_count
+    ]
+
+    # Flatten all errors from tied groups
+    all_errors = [error for group in tied_groups for error in group]
+
+    # Indicate if there was a tie
+    is_tied = len(tied_groups) > 1
+
+    return all_errors, is_tied
+
+
 @click.group()
 @click.version_option(package_name="overture-schema")
 def cli() -> None:
@@ -122,25 +411,6 @@ def flatten_geojson(_feature: dict[str, Any]) -> dict[str, Any]:
     return feature
 
 
-def filter_tagged_union_from_path(loc: tuple[str | int, ...]) -> list[str | int]:
-    """Filter out tagged-union noise from validation error path.
-
-    Args:
-        loc: Tuple of path components from Pydantic validation error
-
-    Returns:
-        List of path components with tagged-union elements removed
-    """
-    filtered_loc: list[str | int] = []
-    for part in loc:
-        # Skip tagged-union[...] elements
-        if isinstance(part, str) and part.startswith("tagged-union["):
-            continue
-        else:
-            filtered_loc.append(part)
-    return filtered_loc
-
-
 def format_path(filtered_loc: list[str | int]) -> str:
     """Convert filtered location path to dot-separated string.
 
@@ -165,12 +435,19 @@ def format_path(filtered_loc: list[str | int]) -> str:
     return path_str
 
 
-def format_validation_error(error: Any, console: Console) -> None:  # noqa: ANN401
+def format_validation_error(
+    error: Any,
+    console: Console,
+    model_type: Any = None,  # noqa: ANN401
+    show_model_hint: bool = False,
+) -> None:
     """Format and print a single validation error.
 
     Args:
         error: Pydantic validation error dict
         console: Rich Console instance for output
+        model_type: The union type being validated against (optional)
+        show_model_hint: Show which model was selected for validation (first error only)
 
     TODO: Add optional Rich Table display for errors (--show-table flag)
         - Show the feature data that failed validation
@@ -187,11 +464,49 @@ def format_validation_error(error: Any, console: Console) -> None:  # noqa: ANN4
     """
     loc = error["loc"]
 
-    # Filter out tagged-union noise from the path
-    filtered_loc = filter_tagged_union_from_path(loc)
+    # Determine which model was selected for this error
+    selected_model = None
+    if model_type is not None and show_model_hint:
+        try:
+            metadata = introspect_union(model_type)
+            structural = create_structural_tuple(loc, model_type)
+
+            # Look for discriminator value in the location path
+            for element, struct_type in zip(loc, structural, strict=False):
+                if struct_type == "discriminator" and isinstance(element, str):
+                    selected_model = metadata.discriminator_to_model.get(element)
+                    break
+                elif struct_type == "model" and isinstance(element, str):
+                    selected_model = metadata.model_name_to_model.get(element)
+                    break
+        except Exception:
+            pass
+
+    # Filter out union markers from the path using structural analysis
+    if model_type is not None:
+        try:
+            structural = create_structural_tuple(loc, model_type)
+            # Filter out 'union', 'model', and 'discriminator' markers
+            # Keep only 'list_index' and 'field' elements for display
+            filtered_loc = [
+                element
+                for element, struct_type in zip(loc, structural, strict=False)
+                if struct_type in ("list_index", "field")
+            ]
+        except Exception:
+            # Fall back to original loc if structural analysis fails
+            filtered_loc = list(loc)
+    else:
+        filtered_loc = list(loc)
 
     # Convert to dot-separated path
     path_str = format_path(filtered_loc)
+
+    # Show model hint if this is the first error in a group
+    if selected_model is not None:
+        model_name = selected_model.__name__
+        console.print(f"  [dim]Probable type:[/dim] {model_name}", style="blue")
+        console.print()
 
     # Format the error message
     msg = error["msg"]
@@ -290,8 +605,22 @@ def validate(
         stderr.print("Validation failed:", style="red")
         stderr.print()
 
-        for error in e.errors():
-            format_validation_error(error, stderr)
+        # Group errors by discriminator path and select most likely group(s)
+        error_groups = group_errors_by_discriminator(e.errors(), model_type)
+        filtered_errors, is_tied = select_most_likely_errors(error_groups)
+
+        # Show tie indicator if multiple groups had same error count
+        if is_tied:
+            stderr.print(
+                "  ⚠ Ambiguous: multiple possible interpretations with equal error counts",
+                style="yellow dim",
+            )
+            stderr.print()
+
+        # Display the most likely errors
+        for i, error in enumerate(filtered_errors):
+            # Show model hint only for the first error
+            format_validation_error(error, stderr, model_type, show_model_hint=(i == 0))
 
         sys.exit(1)
 

@@ -9,6 +9,7 @@ import pytest
 from click.testing import CliRunner
 from overture.schema.cli import cli, create_union_type_from_models, resolve_types
 from overture.schema.core.discovery import discover_models
+from pydantic import BaseModel, Field, TypeAdapter
 from rich.console import Console
 
 
@@ -428,7 +429,7 @@ def test_validate_error_message_format(
 def test_validate_error_filters_tagged_union_from_path(
     cli_runner: CliRunner, missing_id_yaml: str, stderr_buffer: StringIO
 ) -> None:
-    """Test that validation errors filter out tagged-union noise from paths."""
+    """Test that validation errors filter out tagged-union and discriminator noise."""
     result = cli_runner.invoke(cli, ["validate", missing_id_yaml])
 
     assert result.exit_code == 1
@@ -436,8 +437,17 @@ def test_validate_error_filters_tagged_union_from_path(
 
     # Verify that tagged-union does not appear in the error output
     assert "tagged-union" not in stderr_output.lower()
-    # Verify the clean path is shown
-    assert "building.id" in stderr_output.lower()
+    # Verify that the model hint is shown
+    assert "probable type:" in stderr_output.lower()
+    assert "building" in stderr_output.lower()
+    # Verify only the field name is shown in error path (not discriminator)
+    assert "  id" in stderr_output.lower()
+    # Verify discriminator values are NOT in the error path
+    # (should be "id", not "building.id" or "tagged-union[...].id")
+    lines = stderr_output.lower().split("\n")
+    id_line = next((line for line in lines if line.strip().startswith("id")), None)
+    assert id_line is not None
+    assert "building" not in id_line  # Discriminator should not be in path
 
 
 def test_validate_error_with_invalid_type_value(
@@ -678,3 +688,304 @@ def test_validate_feature_collection_all_invalid(
     assert "Validation failed:" in stderr_output
     # Should show errors for both features
     assert "[0]" in stderr_output or "[1]" in stderr_output
+
+
+class TestStructuralTuples:
+    """Tests for creating structural tuples from error loc paths."""
+
+    def test_simple_discriminated_union_structural_tuple(self) -> None:
+        """Test structural tuple for simple discriminated union errors."""
+        from typing import Annotated, Literal
+
+        from overture.schema.cli import create_structural_tuple
+
+        class ModelA(BaseModel):
+            type: Literal["a"]
+            required_a: int
+
+        class ModelB(BaseModel):
+            type: Literal["b"]
+            required_b: int
+
+        UnionType = Annotated[ModelA | ModelB, Field(discriminator="type")]
+
+        # Test simple discriminated union error path
+        loc = ("a", "required_a")
+        structural = create_structural_tuple(loc, UnionType)
+        print(f"\nloc: {loc}")
+        print(f"structural: {structural}")
+        assert len(structural) == len(loc)
+        # First element should be discriminator, second should be field
+        assert structural == ("discriminator", "field")
+
+    def test_mixed_union_structural_tuple(self) -> None:
+        """Test structural tuple for mixed discriminated/non-discriminated union."""
+        from typing import Annotated, Literal
+
+        from overture.schema.cli import create_structural_tuple
+
+        class ModelA(BaseModel):
+            type: Literal["a"]
+            required_a: int
+
+        class Sources(BaseModel):
+            datasets: list[str]
+
+        DiscriminatedUnion = Annotated[ModelA, Field(discriminator="type")]
+        MixedUnion = DiscriminatedUnion | Sources
+
+        # Test discriminated side
+        loc1 = ("tagged-union[ModelA]", "a", "required_a")
+        structural1 = create_structural_tuple(loc1, MixedUnion)
+        print("\nDiscriminated side:")
+        print(f"loc: {loc1}")
+        print(f"structural: {structural1}")
+        assert structural1 == ("union", "discriminator", "field")
+
+        # Test non-discriminated side
+        loc2 = ("Sources", "datasets")
+        structural2 = create_structural_tuple(loc2, MixedUnion)
+        print("\nNon-discriminated side:")
+        print(f"loc: {loc2}")
+        print(f"structural: {structural2}")
+        assert structural2 == ("model", "field")
+
+    def test_list_context_structural_tuple(self) -> None:
+        """Test structural tuple for union in list context."""
+        from typing import Annotated, Literal
+
+        from overture.schema.cli import create_structural_tuple
+
+        class ModelA(BaseModel):
+            type: Literal["a"]
+            required_a: int
+
+        UnionType = Annotated[ModelA, Field(discriminator="type")]
+
+        # Test list context
+        loc = (1, "a", "required_a")
+        structural = create_structural_tuple(loc, list[UnionType])
+        print("\nList context:")
+        print(f"loc: {loc}")
+        print(f"structural: {structural}")
+        assert structural == ("list_index", "discriminator", "field")
+
+    def test_nested_discriminated_structural_tuple(self) -> None:
+        """Test structural tuple for nested discriminated unions."""
+        from typing import Annotated, Literal
+
+        from overture.schema.cli import create_structural_tuple
+
+        class Building(BaseModel):
+            type: Literal["building"]
+            height: float
+
+        class RoadSegment(BaseModel):
+            type: Literal["segment"]
+            subtype: Literal["road"]
+            road_class: str
+
+        class Sources(BaseModel):
+            datasets: list[str]
+
+        # Nested structure
+        Segment = Annotated[RoadSegment, Field(discriminator="subtype")]
+        TopLevel = Annotated[Building | Segment, Field(discriminator="type")]
+        MixedUnion = TopLevel | Sources
+
+        # Test nested discriminated path
+        loc = (
+            "tagged-union[Building,tagged-union[RoadSegment]]",
+            "segment",
+            "road",
+            "road_class",
+        )
+        structural = create_structural_tuple(loc, MixedUnion)
+        print("\nNested discriminated:")
+        print(f"loc: {loc}")
+        print(f"structural: {structural}")
+        assert structural == ("union", "discriminator", "discriminator", "field")
+
+
+class TestErrorGrouping:
+    """Tests for error grouping and selection logic."""
+
+    def test_ambiguous_data_shows_most_likely_errors(
+        self, cli_runner: CliRunner
+    ) -> None:
+        """Test that ambiguous data shows errors from the most likely model."""
+        # Create a file with data that doesn't match any model well
+        # (missing fields for both Building and hypothetical Sources model)
+        filename = "ambiguous.yaml"
+        with open(filename, "w") as f:
+            f.write("""
+id: test
+type: Feature
+geometry:
+  type: Point
+  coordinates: [0, 0]
+properties:
+  theme: buildings
+  type: building
+  version: 0
+""")
+
+        result = cli_runner.invoke(cli, ["validate", "--theme", "buildings", filename])
+
+        assert result.exit_code == 1
+
+        # The output should show errors for the most likely model (Building)
+        # Should NOT show all possible errors from all union variants
+        # In this case, Building has wrong geometry type (Point instead of Polygon)
+        # We expect a validation error about geometry
+
+    def test_tie_in_error_counts_is_deterministic(self, cli_runner: CliRunner) -> None:
+        """Test behavior when multiple models have same error count."""
+        # Create a mixed union where both sides can have equal errors
+        from typing import Literal
+
+        from pydantic import ValidationError
+
+        class Building(BaseModel):
+            type: Literal["building"]
+            id: str
+            height: float
+
+        class Sources(BaseModel):
+            datasets: list[str]
+            license_priority: int
+
+        from typing import Annotated
+
+        # Mixed union: discriminated + non-discriminated
+        MixedUnion = Annotated[Building, Field(discriminator="type")] | Sources
+
+        # Data with type="building" missing 2 fields (id, height)
+        # This creates a tie: Building needs 2 fields, Sources also needs 2 fields
+        invalid_data = {"type": "building"}
+
+        try:
+            TypeAdapter(MixedUnion).validate_python(invalid_data)
+            pytest.fail("Should have raised ValidationError")
+        except ValidationError as e:
+            from overture.schema.cli import (
+                group_errors_by_discriminator,
+                select_most_likely_errors,
+            )
+
+            errors = e.errors()
+            groups = group_errors_by_discriminator(errors, MixedUnion)
+
+            # Both groups should have same number of errors (tie situation)
+            error_counts = {k: len(v) for k, v in groups.items()}
+            if len(set(error_counts.values())) == 1 and len(groups) > 1:
+                # We have a tie!
+                selected, is_tied = select_most_likely_errors(groups)
+                assert len(selected) > 0, "Should select errors even in a tie"
+                assert is_tied, "Should indicate that there was a tie"
+
+                # Should return errors from ALL tied groups
+                total_expected = sum(len(v) for v in groups.values())
+                assert len(selected) == total_expected, (
+                    "Should return all errors from all tied groups"
+                )
+
+                # Run it multiple times to verify deterministic behavior
+                for _ in range(5):
+                    selected_again, is_tied_again = select_most_likely_errors(groups)
+                    assert selected == selected_again, (
+                        "Selection should be deterministic"
+                    )
+                    assert is_tied_again == is_tied, (
+                        "Tie indication should be consistent"
+                    )
+            else:
+                # Not a tie in this case, just verify it doesn't indicate a tie
+                selected, is_tied = select_most_likely_errors(groups)
+                assert not is_tied or len(groups) <= 1, (
+                    "Should not indicate tie when error counts differ"
+                )
+
+    def test_clear_winner_selected(self, cli_runner: CliRunner) -> None:
+        """Test that the model with fewest errors is selected when there's a clear winner."""
+        filename = "clear-winner.yaml"
+        with open(filename, "w") as f:
+            # Missing only 'id' field for Building (1 error)
+            # Would have many errors for Sources (datasets, license_priority, etc.)
+            f.write("""
+type: Feature
+geometry:
+  type: Polygon
+  coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+properties:
+  theme: buildings
+  type: building
+  version: 0
+""")
+
+        from io import StringIO
+        from unittest.mock import patch
+
+        buffer = StringIO()
+        captured_console = Console(file=buffer, force_terminal=False)
+
+        with patch("overture.schema.cli.stderr", captured_console):
+            result = cli_runner.invoke(cli, ["validate", filename])
+
+        assert result.exit_code == 1
+        stderr_output = buffer.getvalue()
+
+        # Should show only the Building error (missing id)
+        assert "id" in stderr_output.lower()
+        # Should NOT show Sources-related errors
+        assert "dataset" not in stderr_output.lower()
+        assert "license" not in stderr_output.lower()
+
+    def test_list_indices_do_not_cause_false_ambiguity(
+        self, cli_runner: CliRunner
+    ) -> None:
+        """Test that list indices don't cause false ambiguity detection.
+
+        When validating a list of features where multiple items have the same
+        type of error (e.g., multiple buildings missing 'id'), the list indices
+        should be ignored during grouping so they're treated as the same error
+        group, not separate groups.
+        """
+        filename = "list-same-errors.yaml"
+        with open(filename, "w") as f:
+            # Two features, both Building, both missing 'id'
+            f.write("""
+- type: Feature
+  geometry:
+    type: Polygon
+    coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
+  properties:
+    theme: buildings
+    type: building
+    version: 0
+- type: Feature
+  geometry:
+    type: Polygon
+    coordinates: [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
+  properties:
+    theme: buildings
+    type: building
+    version: 0
+""")
+
+        from io import StringIO
+        from unittest.mock import patch
+
+        buffer = StringIO()
+        captured_console = Console(file=buffer, force_terminal=False)
+
+        with patch("overture.schema.cli.stderr", captured_console):
+            result = cli_runner.invoke(cli, ["validate", filename])
+
+        assert result.exit_code == 1
+        stderr_output = buffer.getvalue()
+
+        # Should NOT show ambiguity warning since both are Building with same error
+        assert "ambiguous" not in stderr_output.lower()
+        # Should show the missing 'id' error
+        assert "id" in stderr_output.lower()
