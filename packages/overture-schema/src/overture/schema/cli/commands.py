@@ -100,6 +100,18 @@ def resolve_types(
     return create_union_type_from_models(filtered_models)
 
 
+def get_source_name(filename: Path | None) -> str:
+    """Get display name for input source.
+
+    Args:
+        filename: Path to input file, None for stdin, or "-" for explicit stdin
+
+    Returns:
+        Display name: "<stdin>" for stdin input, otherwise the filename
+    """
+    return "<stdin>" if (filename is None or str(filename) == "-") else str(filename)
+
+
 @click.group()
 @click.version_option(package_name="overture-schema")
 def cli() -> None:
@@ -121,7 +133,7 @@ def load_input(filename: Path | None) -> tuple[dict | list, str]:
         SystemExit: If filename doesn't exist or isn't a file
     """
     use_stdin = filename is None or str(filename) == "-"
-    source_name = "<stdin>" if use_stdin else str(filename)
+    source_name = get_source_name(filename)
 
     if not use_stdin:
         assert filename is not None  # Type narrowing for mypy
@@ -300,9 +312,7 @@ def handle_generic_error(e: Exception, filename: Path | None, error_type: str) -
     Raises:
         click.UsageError: Always, with formatted error message
     """
-    source_name = (
-        "<stdin>" if (filename is None or str(filename) == "-") else str(filename)
-    )
+    source_name = get_source_name(filename)
 
     if error_type == "yaml":
         raise click.UsageError(f"'{source_name}' contains invalid input: {e}")
