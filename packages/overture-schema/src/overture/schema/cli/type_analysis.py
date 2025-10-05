@@ -29,14 +29,96 @@ class UnionMetadata:
     nested_unions: dict[str, "UnionMetadata"]
 
 
+def _process_union_member(
+    member: Any,  # noqa: ANN401
+    discriminator_to_model: dict[str, type[BaseModel]],
+    model_name_to_model: dict[str, type[BaseModel]],
+    nested_unions: dict[str, UnionMetadata],
+) -> None:
+    """Process a single union member, handling nesting recursively.
+
+    Args:
+        member: A union member type (could be Annotated, BaseModel, or nested union)
+        discriminator_to_model: Dict to populate with discriminator value mappings
+        model_name_to_model: Dict to populate with model name mappings
+        nested_unions: Dict to populate with nested union metadata
+    """
+    member_origin = get_origin(member)
+
+    # Case 1: Annotated type (might contain nested union)
+    if member_origin is AnnotatedType:
+        member_args = get_args(member)
+        if not member_args:
+            return
+
+        # Check for discriminator in annotations
+        has_discriminator = any(
+            isinstance(metadata, FieldInfo) and hasattr(metadata, "discriminator")
+            for metadata in member_args[1:]
+        )
+
+        if has_discriminator or get_origin(member_args[0]) is not None:
+            # Nested union (with or without discriminator)
+            nested_metadata = introspect_union(member)
+            nested_unions[str(member)] = nested_metadata
+            discriminator_to_model.update(nested_metadata.discriminator_to_model)
+            return
+
+    # Case 2: BaseModel class
+    if inspect.isclass(member) and issubclass(member, BaseModel):
+        model_name_to_model[member.__name__] = member
+
+        # Extract discriminator values from ALL Literal fields
+        # This handles nested discriminators with different field names
+        for _field_name, field_info in member.model_fields.items():
+            annotation = field_info.annotation
+            if get_origin(annotation) is Literal:
+                literal_args = get_args(annotation)
+                if literal_args:
+                    discriminator_to_model[literal_args[0]] = member
+
+
 def introspect_union(union_type: Any) -> UnionMetadata:  # noqa: ANN401
     """Introspect a union type to extract structural information.
+
+    Analyzes a union type (which may be discriminated or non-discriminated) to
+    extract metadata about its structure, including discriminator fields, model
+    mappings, and nested union information. This metadata is used for structural
+    analysis of validation error paths.
 
     Args:
         union_type: A union type (may be Annotated with discriminator)
 
     Returns:
         UnionMetadata describing the structure of the union
+
+    Examples:
+        >>> # Discriminated union with 'type' field
+        >>> BuildingUnion = Annotated[
+        ...     Union[Building, BuildingPart],
+        ...     Field(discriminator='type')
+        ... ]
+        >>> metadata = introspect_union(BuildingUnion)
+        >>> metadata.is_discriminated
+        True
+        >>> metadata.discriminator_field
+        'type'
+        >>> 'building' in metadata.discriminator_to_model
+        True
+
+        >>> # Non-discriminated union
+        >>> TransportationUnion = Union[Segment, Connector]
+        >>> metadata = introspect_union(TransportationUnion)
+        >>> metadata.is_discriminated
+        False
+        >>> 'Segment' in metadata.model_name_to_model
+        True
+
+        >>> # List of discriminated union (unwraps to element type)
+        >>> FeatureList = list[BuildingUnion]
+        >>> metadata = introspect_union(FeatureList)
+        >>> metadata.is_discriminated
+        True
     """
     # Check if this is a list type - unwrap to get the element type
     origin = get_origin(union_type)
@@ -79,60 +161,11 @@ def introspect_union(union_type: Any) -> UnionMetadata:  # noqa: ANN401
     model_name_to_model: dict[str, type[BaseModel]] = {}
     nested_unions: dict[str, UnionMetadata] = {}
 
-    # Analyze each union member
+    # Process each union member
     for member in union_members:
-        # Check if member is itself annotated (nested discriminated union)
-        member_origin = get_origin(member)
-
-        # If it's an Annotated type, it might contain a discriminated union
-        if member_origin is AnnotatedType:
-            # Check if this is an Annotated with a discriminator
-            member_args = get_args(member)
-            if member_args:
-                # Check for Field with discriminator in the annotations
-                has_discriminator = False
-                for metadata in member_args[1:]:
-                    if isinstance(metadata, FieldInfo) and hasattr(
-                        metadata, "discriminator"
-                    ):
-                        has_discriminator = True
-                        break
-
-                if has_discriminator:
-                    # This is a nested discriminated union
-                    nested_metadata = introspect_union(member)
-                    nested_unions[str(member)] = nested_metadata
-                    # Also extract discriminator mappings from the nested union
-                    discriminator_to_model.update(
-                        nested_metadata.discriminator_to_model
-                    )
-                    continue
-
-                # Check if the inner type is a union (could be Union without Annotated)
-                inner_type = member_args[0]
-                if get_origin(inner_type) is not None:
-                    # Nested union without discriminator at this level
-                    nested_metadata = introspect_union(member)
-                    nested_unions[str(member)] = nested_metadata
-                    discriminator_to_model.update(
-                        nested_metadata.discriminator_to_model
-                    )
-                    continue
-
-        # It's a BaseModel
-        if inspect.isclass(member) and issubclass(member, BaseModel):
-            model_name_to_model[member.__name__] = member
-
-            # Extract discriminator values from ALL Literal fields (not just the current discriminator)
-            # This handles nested discriminators with different field names
-            for _field_name, field_info in member.model_fields.items():
-                annotation = field_info.annotation
-                literal_origin = get_origin(annotation)
-                if literal_origin is Literal:
-                    literal_args = get_args(annotation)
-                    if literal_args:
-                        disc_value = literal_args[0]
-                        discriminator_to_model[disc_value] = member
+        _process_union_member(
+            member, discriminator_to_model, model_name_to_model, nested_unions
+        )
 
     return UnionMetadata(
         is_discriminated=discriminator_field is not None,
@@ -149,54 +182,54 @@ def create_structural_tuple(
 ) -> StructuralTuple:
     """Create a structural tuple parallel to error['loc'] describing each element.
 
+    The structural tuple helps identify which parts of an error path are:
+    - list_index: Indices from array iteration
+    - union: Pydantic's tagged union markers (e.g., 'tagged-union[type]')
+    - discriminator: Discriminator values (e.g., 'building', 'segment')
+    - model: Model class names in non-discriminated unions (e.g., 'Segment')
+    - field: Actual data field names (e.g., 'height', 'id')
+
     Args:
         loc: The location tuple from a Pydantic validation error
         metadata: Pre-computed UnionMetadata from introspect_union()
 
     Returns:
         Tuple of same length as loc with structural labels for each element
+
+    Examples:
+        >>> # Error in first feature of a list, in a building's height field
+        >>> loc = (0, 'tagged-union[type]', 'building', 'height')
+        >>> metadata = introspect_union(BuildingUnion)
+        >>> create_structural_tuple(loc, metadata)
+        ('list_index', 'union', 'discriminator', 'field')
+
+        >>> # Error in a non-discriminated union (uses model name)
+        >>> loc = ('Segment', 'connectors', 0)
+        >>> metadata = introspect_union(TransportationUnion)
+        >>> create_structural_tuple(loc, metadata)
+        ('model', 'field', 'list_index')
+
+        >>> # Simple field error (no union involved)
+        >>> loc = ('id',)
+        >>> metadata = introspect_union(Building)
+        >>> create_structural_tuple(loc, metadata)
+        ('field',)
     """
-    structural: list[StructuralElement] = []
 
-    i = 0
-    while i < len(loc):
-        element = loc[i]
-
-        # Check if it's a list index (integer)
+    def classify(element: str | int) -> StructuralElement:
+        """Classify a single location element."""
         if isinstance(element, int):
-            structural.append("list_index")
-            i += 1
-            continue
+            return "list_index"
+        if isinstance(element, str):
+            if element.startswith("tagged-union["):
+                return "union"
+            if element in metadata.model_name_to_model:
+                return "model"
+            if element in metadata.discriminator_to_model:
+                return "discriminator"
+        return "field"
 
-        # Check if it's a union marker string
-        if isinstance(element, str) and element.startswith("tagged-union["):
-            structural.append("union")
-            i += 1
-            # After a union marker, expect discriminator value(s)
-            # Continue to identify following discriminator elements
-            continue
-
-        # Check if it's a model class name (non-discriminated union member)
-        if isinstance(element, str) and element in metadata.model_name_to_model:
-            structural.append("model")
-            i += 1
-            continue
-
-        # Check if it's a discriminator value (can come from nested unions)
-        if isinstance(element, str) and element in metadata.discriminator_to_model:
-            structural.append("discriminator")
-            i += 1
-            # After discriminator, might have more discriminators (nested) or fields
-            # Check if the selected model has nested unions
-            selected_model = metadata.discriminator_to_model[element]
-            # For now, assume next elements are either more discriminators or fields
-            continue
-
-        # Otherwise, it's a field name
-        structural.append("field")
-        i += 1
-
-    return tuple(structural)
+    return tuple(classify(e) for e in loc)
 
 
 def get_item_index(loc: ErrorLocation) -> int | None:
@@ -263,12 +296,44 @@ def extract_discriminator_path(
     values - everything up to (but not including) the first field. List indices are
     excluded to prevent false ambiguity when validating lists of features.
 
+    This path uniquely identifies which model variant was selected during validation,
+    allowing errors to be grouped by the type they're associated with.
+
     Args:
         loc: The location tuple from a Pydantic validation error
         structural: The parallel structural tuple
 
     Returns:
         The discriminator path portion of the location tuple (excluding list_index)
+
+    Examples:
+        >>> # Discriminated union with field error
+        >>> loc = (0, 'tagged-union[type]', 'building', 'height')
+        >>> structural = ('list_index', 'union', 'discriminator', 'field')
+        >>> extract_discriminator_path(loc, structural)
+        ('tagged-union[type]', 'building')
+
+        >>> # Non-discriminated union
+        >>> loc = ('Segment', 'connectors', 0)
+        >>> structural = ('model', 'field', 'list_index')
+        >>> extract_discriminator_path(loc, structural)
+        ('Segment',)
+
+        >>> # Root field error (no discriminator)
+        >>> loc = ('id',)
+        >>> structural = ('field',)
+        >>> extract_discriminator_path(loc, structural)
+        ()
+
+        >>> # Multiple list items with same error type are grouped together
+        >>> loc1 = (0, 'tagged-union[type]', 'building', 'height')
+        >>> loc2 = (5, 'tagged-union[type]', 'building', 'height')
+        >>> structural = ('list_index', 'union', 'discriminator', 'field')
+        >>> extract_discriminator_path(loc1, structural)
+        ('tagged-union[type]', 'building')
+        >>> extract_discriminator_path(loc2, structural)
+        ('tagged-union[type]', 'building')
+        >>> # Both produce same discriminator path despite different list indices
     """
     discriminator_path = []
     for element, struct_type in zip(loc, structural, strict=False):

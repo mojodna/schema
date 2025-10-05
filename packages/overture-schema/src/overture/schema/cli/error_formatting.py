@@ -21,12 +21,44 @@ def group_errors_by_discriminator(
 ) -> dict[ErrorLocation, list[ValidationErrorDict]]:
     """Group validation errors by their discriminator path.
 
+    Errors are grouped by which model variant they're associated with, as indicated
+    by their discriminator path. This allows the CLI to show only errors for the most
+    likely intended type, rather than overwhelming the user with errors from all
+    possible union variants.
+
     Args:
         errors: List of Pydantic validation error dicts
         metadata: Pre-computed UnionMetadata from introspect_union()
 
     Returns:
         Dictionary mapping discriminator paths to lists of errors
+
+    Examples:
+        >>> # Errors from validating two buildings with different issues
+        >>> errors = [
+        ...     {'loc': (0, 'tagged-union[type]', 'building', 'height'), 'msg': 'Field required'},
+        ...     {'loc': (0, 'tagged-union[type]', 'building', 'id'), 'msg': 'Field required'},
+        ...     {'loc': (1, 'tagged-union[type]', 'building', 'geometry'), 'msg': 'Invalid geometry'},
+        ... ]
+        >>> metadata = introspect_union(BuildingUnion)
+        >>> groups = group_errors_by_discriminator(errors, metadata)
+        >>> list(groups.keys())
+        [('tagged-union[type]', 'building')]
+        >>> len(groups[('tagged-union[type]', 'building')])
+        3
+
+        >>> # Errors from ambiguous data matching multiple types
+        >>> errors = [
+        ...     {'loc': ('tagged-union[type]', 'building', 'height'), 'msg': 'Field required'},
+        ...     {'loc': ('tagged-union[type]', 'building_part', 'building_id'), 'msg': 'Field required'},
+        ... ]
+        >>> groups = group_errors_by_discriminator(errors, metadata)
+        >>> len(groups)  # Two groups - one for each potential type
+        2
+        >>> ('tagged-union[type]', 'building') in groups
+        True
+        >>> ('tagged-union[type]', 'building_part') in groups
+        True
     """
     groups: dict[ErrorLocation, list[ValidationErrorDict]] = {}
 
