@@ -266,3 +266,54 @@ features:
             # Should show errors for list items
             if not first_feature_valid or not second_feature_valid:
                 assert "[0]" in stderr_output or "[1]" in stderr_output
+
+    def test_validate_with_nonexistent_filters_raises_error(
+        self,
+        cli_runner: CliRunner,
+        stderr_buffer: StringIO,
+        building_feature_yaml_content: str,
+    ) -> None:
+        """Test that validation with filters matching no models raises a clear error."""
+        # Try to validate with a nonexistent theme
+        result = cli_runner.invoke(
+            cli,
+            ["validate", "--theme", "nonexistent_theme"],
+            input=building_feature_yaml_content,
+        )
+        assert result.exit_code == 1
+        stderr_output = stderr_buffer.getvalue()
+        assert "No models found matching the specified criteria" in stderr_output
+
+    def test_validate_with_nonexistent_type_raises_error(
+        self,
+        cli_runner: CliRunner,
+        stderr_buffer: StringIO,
+        building_feature_yaml_content: str,
+    ) -> None:
+        """Test that validation with nonexistent type raises a clear error."""
+        # Try to validate with a nonexistent type
+        result = cli_runner.invoke(
+            cli,
+            ["validate", "--type", "nonexistent_type"],
+            input=building_feature_yaml_content,
+        )
+        assert result.exit_code == 1
+        stderr_output = stderr_buffer.getvalue()
+        assert "No models found matching the specified criteria" in stderr_output
+
+    def test_validate_with_valid_theme_invalid_type_raises_error(
+        self,
+        cli_runner: CliRunner,
+        stderr_buffer: StringIO,
+        building_feature_yaml_content: str,
+    ) -> None:
+        """Test that validation with valid theme but invalid type raises an error."""
+        # Try to validate buildings theme with a type that doesn't exist in that theme
+        result = cli_runner.invoke(
+            cli,
+            ["validate", "--theme", "buildings", "--type", "segment"],
+            input=building_feature_yaml_content,
+        )
+        assert result.exit_code == 1
+        stderr_output = stderr_buffer.getvalue()
+        assert "No models found matching the specified criteria" in stderr_output
