@@ -161,7 +161,7 @@ class TestPerformValidation:
 
     def test_perform_validation_empty_list(self) -> None:
         """Test validating an empty list (edge case)."""
-        data = []
+        data: list[dict[str, object]] = []
         model_type = resolve_types(False, None, ("buildings",), ())
 
         # Should not raise

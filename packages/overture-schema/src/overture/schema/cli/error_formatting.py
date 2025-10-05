@@ -32,6 +32,14 @@ def group_errors_by_discriminator(
         Dictionary mapping discriminator paths to lists of errors
 
     Examples:
+        >>> from typing import Annotated, Union
+        >>> from pydantic import Field
+        >>> from overture.schema.buildings import Building, BuildingPart
+        >>> from overture.schema.cli.type_analysis import introspect_union
+        >>> BuildingUnion = Annotated[
+        ...     Union[Building, BuildingPart],
+        ...     Field(discriminator='type')
+        ... ]
         >>> # Errors from validating two buildings with different issues
         >>> errors = [
         ...     {'loc': (0, 'tagged-union[type]', 'building', 'height'), 'msg': 'Field required'},

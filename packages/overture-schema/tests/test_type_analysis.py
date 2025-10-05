@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 
 import pytest
 from overture.schema.cli.type_analysis import (
+    StructuralTuple,
     create_structural_tuple,
     extract_discriminator_path,
     introspect_union,
@@ -186,7 +187,7 @@ class TestExtractDiscriminatorPath:
     def test_extract_discriminator_path_variations(
         self,
         loc: tuple[str | int, ...],
-        structural: tuple[str, ...],
+        structural: StructuralTuple,
         expected_path: tuple[str | int, ...],
     ) -> None:
         """Test extract_discriminator_path with various input patterns."""

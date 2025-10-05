@@ -59,7 +59,7 @@ def validate_feature(
     """
     flattened_feature = _flatten_feature(feature)
     adapter = get_type_adapter(model_type)
-    return adapter.validate_python(flattened_feature)
+    return cast(BaseModel, adapter.validate_python(flattened_feature))
 
 
 def validate_features(
@@ -83,8 +83,8 @@ def validate_features(
     Each feature in the list is flattened individually before validation.
     """
     flattened_features = [_flatten_feature(f) for f in features]
-    list_adapter = get_type_adapter(list[model_type])
-    return list_adapter.validate_python(flattened_features)
+    list_adapter: Any = get_type_adapter(list[model_type])  # type: ignore[arg-type,valid-type]
+    return cast(list[BaseModel], list_adapter.validate_python(flattened_features))
 
 
 def parse_feature(

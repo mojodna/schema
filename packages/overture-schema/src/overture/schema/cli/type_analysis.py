@@ -93,6 +93,10 @@ def introspect_union(union_type: Any) -> UnionMetadata:  # noqa: ANN401
         UnionMetadata describing the structure of the union
 
     Examples:
+        >>> from typing import Annotated, Union
+        >>> from pydantic import Field
+        >>> from overture.schema.buildings import Building, BuildingPart
+        >>> from overture.schema.transportation import Segment, Connector
         >>> # Discriminated union with 'type' field
         >>> BuildingUnion = Annotated[
         ...     Union[Building, BuildingPart],
@@ -106,12 +110,13 @@ def introspect_union(union_type: Any) -> UnionMetadata:  # noqa: ANN401
         >>> 'building' in metadata.discriminator_to_model
         True
 
-        >>> # Non-discriminated union
-        >>> TransportationUnion = Union[Segment, Connector]
-        >>> metadata = introspect_union(TransportationUnion)
+        >>> # Non-discriminated union (using plain Union without discriminator)
+        >>> from overture.schema.transportation import Connector
+        >>> PlainUnion = Union[Building, Connector]
+        >>> metadata = introspect_union(PlainUnion)
         >>> metadata.is_discriminated
         False
-        >>> 'Segment' in metadata.model_name_to_model
+        >>> 'Connector' in metadata.model_name_to_model
         True
 
         >>> # List of discriminated union (unwraps to element type)
@@ -197,6 +202,15 @@ def create_structural_tuple(
         Tuple of same length as loc with structural labels for each element
 
     Examples:
+        >>> from typing import Annotated, Union
+        >>> from pydantic import Field
+        >>> from overture.schema.buildings import Building, BuildingPart
+        >>> from overture.schema.transportation import Connector
+        >>> BuildingUnion = Annotated[
+        ...     Union[Building, BuildingPart],
+        ...     Field(discriminator='type')
+        ... ]
+        >>> PlainUnion = Union[Building, Connector]
         >>> # Error in first feature of a list, in a building's height field
         >>> loc = (0, 'tagged-union[type]', 'building', 'height')
         >>> metadata = introspect_union(BuildingUnion)
@@ -204,8 +218,8 @@ def create_structural_tuple(
         ('list_index', 'union', 'discriminator', 'field')
 
         >>> # Error in a non-discriminated union (uses model name)
-        >>> loc = ('Segment', 'connectors', 0)
-        >>> metadata = introspect_union(TransportationUnion)
+        >>> loc = ('Connector', 'connectors', 0)
+        >>> metadata = introspect_union(PlainUnion)
         >>> create_structural_tuple(loc, metadata)
         ('model', 'field', 'list_index')
 
