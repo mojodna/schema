@@ -7,6 +7,12 @@ from .commands import (
     perform_validation,
     resolve_types,
 )
+from .types import (
+    ErrorLocation,
+    ModelDict,
+    UnionType,
+    ValidationErrorDict,
+)
 
 __all__ = [
     "cli",
@@ -14,4 +20,8 @@ __all__ = [
     "load_input",
     "perform_validation",
     "resolve_types",
+    "ErrorLocation",
+    "ModelDict",
+    "UnionType",
+    "ValidationErrorDict",
 ]

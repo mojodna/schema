@@ -12,12 +12,13 @@ from .type_analysis import (
     get_item_index,
     infer_model_from_error,
 )
+from .types import ErrorLocation, UnionType, ValidationErrorDict
 
 
 def group_errors_by_discriminator(
-    errors: list[dict[str, Any]],
+    errors: list[ValidationErrorDict],
     metadata: UnionMetadata,
-) -> dict[tuple[str | int, ...], list[dict[str, Any]]]:
+) -> dict[ErrorLocation, list[ValidationErrorDict]]:
     """Group validation errors by their discriminator path.
 
     Args:
@@ -27,7 +28,7 @@ def group_errors_by_discriminator(
     Returns:
         Dictionary mapping discriminator paths to lists of errors
     """
-    groups: dict[tuple[str | int, ...], list[dict[str, Any]]] = {}
+    groups: dict[ErrorLocation, list[ValidationErrorDict]] = {}
 
     for error in errors:
         loc = error["loc"]
@@ -47,7 +48,7 @@ def group_errors_by_discriminator(
 
 
 def analyze_collection_heterogeneity(
-    errors: list[dict[str, Any]],
+    errors: list[ValidationErrorDict],
     metadata: UnionMetadata,
 ) -> tuple[dict[int, type[BaseModel] | None], bool]:
     """Analyze a collection to detect type heterogeneity.
@@ -62,7 +63,7 @@ def analyze_collection_heterogeneity(
         - is_heterogeneous: True if collection contains multiple model types
     """
     # Group errors by item index
-    item_errors: dict[int | None, list[dict[str, Any]]] = {}
+    item_errors: dict[int | None, list[ValidationErrorDict]] = {}
     for error in errors:
         item_idx = get_item_index(error["loc"])
         if item_idx not in item_errors:
@@ -77,7 +78,7 @@ def analyze_collection_heterogeneity(
             continue
 
         # Group this item's errors by inferred type
-        errors_by_type: dict[type[BaseModel], list[dict[str, Any]]] = {}
+        errors_by_type: dict[type[BaseModel], list[ValidationErrorDict]] = {}
         for error in item_error_list:
             inferred_type = infer_model_from_error(error, metadata)
             if inferred_type is not None:
@@ -101,10 +102,10 @@ def analyze_collection_heterogeneity(
 
 
 def select_most_likely_errors(
-    error_groups: dict[tuple[str | int, ...], list[dict[str, Any]]],
+    error_groups: dict[ErrorLocation, list[ValidationErrorDict]],
     metadata: UnionMetadata | None = None,
-    all_errors: list[dict[str, Any]] | None = None,
-) -> tuple[list[dict[str, Any]], bool, bool, dict[int, type[BaseModel] | None]]:
+    all_errors: list[ValidationErrorDict] | None = None,
+) -> tuple[list[ValidationErrorDict], bool, bool, dict[int, type[BaseModel] | None]]:
     """Select the error group(s) most likely to be the intended model.
 
     Uses heuristic: the group with the fewest errors is most likely correct,
@@ -140,15 +141,16 @@ def select_most_likely_errors(
         )
 
     # For heterogeneous collections, return only errors matching each item's inferred type
-    if is_heterogeneous:
+    if is_heterogeneous and all_errors is not None:
         filtered_errors = []
         for error in all_errors:
             item_idx = get_item_index(error["loc"])
             if item_idx is not None and item_idx in _item_types:
                 # Only include this error if it matches the inferred type for this item
-                error_type = infer_model_from_error(error, metadata)
-                if error_type == _item_types[item_idx]:
-                    filtered_errors.append(error)
+                if metadata is not None:
+                    error_type = infer_model_from_error(error, metadata)
+                    if error_type == _item_types[item_idx]:
+                        filtered_errors.append(error)
             else:
                 # Non-list errors or items without inferred type - include them
                 filtered_errors.append(error)
@@ -197,7 +199,7 @@ def format_path(filtered_loc: list[str | int]) -> str:
 
 
 def format_validation_error(
-    error: Any,
+    error: ValidationErrorDict,
     console: Console,
     metadata: UnionMetadata | None = None,
     show_model_hint: bool = False,

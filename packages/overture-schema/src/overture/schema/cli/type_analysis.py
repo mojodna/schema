@@ -8,8 +8,11 @@ from typing import Any, Literal, get_args, get_origin
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
+from .types import ErrorLocation, ValidationErrorDict
+
 # Type aliases for structural tuple elements
 StructuralElement = Literal["list_index", "union", "model", "discriminator", "field"]
+StructuralTuple = tuple[StructuralElement, ...]
 
 
 @dataclass
@@ -59,7 +62,9 @@ def introspect_union(union_type: Any) -> UnionMetadata:  # noqa: ANN401
                 if isinstance(metadata, FieldInfo) and hasattr(
                     metadata, "discriminator"
                 ):
-                    discriminator_field = metadata.discriminator
+                    disc = metadata.discriminator
+                    # discriminator can be a string or Discriminator object
+                    discriminator_field = str(disc) if disc is not None else None
                     break
 
     # Get union members
@@ -139,9 +144,9 @@ def introspect_union(union_type: Any) -> UnionMetadata:  # noqa: ANN401
 
 
 def create_structural_tuple(
-    loc: tuple[str | int, ...],
+    loc: ErrorLocation,
     metadata: UnionMetadata,
-) -> tuple[StructuralElement, ...]:
+) -> StructuralTuple:
     """Create a structural tuple parallel to error['loc'] describing each element.
 
     Args:
@@ -194,7 +199,7 @@ def create_structural_tuple(
     return tuple(structural)
 
 
-def get_item_index(loc: tuple[str | int, ...]) -> int | None:
+def get_item_index(loc: ErrorLocation) -> int | None:
     """Extract the top-level list index from an error location, if present.
 
     Args:
@@ -209,7 +214,7 @@ def get_item_index(loc: tuple[str | int, ...]) -> int | None:
 
 
 def infer_model_from_error(
-    error: dict[str, Any],
+    error: ValidationErrorDict,
     metadata: UnionMetadata,
 ) -> type[BaseModel] | None:
     """Infer the model type that an error is associated with.
@@ -249,9 +254,9 @@ def infer_model_from_error(
 
 
 def extract_discriminator_path(
-    loc: tuple[str | int, ...],
-    structural: tuple[StructuralElement, ...],
-) -> tuple[str | int, ...]:
+    loc: ErrorLocation,
+    structural: StructuralTuple,
+) -> ErrorLocation:
     """Extract the discriminator path from a location tuple.
 
     The discriminator path includes union markers, model names, and discriminator

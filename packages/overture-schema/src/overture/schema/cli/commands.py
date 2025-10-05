@@ -1,9 +1,10 @@
 """Click-based CLI for overture-schema package."""
 
+import builtins
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Type
 
 import click
 import yaml
@@ -24,6 +25,7 @@ from .error_formatting import (
 )
 from .output import rewrap
 from .type_analysis import get_item_index, introspect_union
+from .types import ModelDict, UnionType
 
 # Create a console instances for rich output
 stdout = Console(highlight=False)
@@ -31,8 +33,8 @@ stderr = Console(highlight=False, file=sys.stderr)
 
 
 def create_union_type_from_models(
-    models: dict[ModelKey, type],
-) -> Any:  # noqa: ANN401
+    models: ModelDict,
+) -> UnionType:
     """Create a discriminated union type from a dict of models.
 
     Args:
@@ -49,7 +51,7 @@ def resolve_types(
     namespace: str | None,
     theme_names: tuple[str, ...],
     type_names: tuple[str, ...],
-) -> Any:  # noqa: ANN401
+) -> UnionType:
     """Resolve CLI options into a model type suitable for parse_feature.
 
     Args:
@@ -65,7 +67,7 @@ def resolve_types(
     all_models = discover_models(namespace=namespace)
 
     # Filter models based on CLI options
-    filtered_models = {}
+    filtered_models: ModelDict = {}
 
     if use_overture_types:
         # Use only official Overture types (namespace="overture")
@@ -106,7 +108,7 @@ def cli() -> None:
     pass
 
 
-def load_input(filename: Path | None) -> tuple[Any, str]:
+def load_input(filename: Path | None) -> tuple[dict | list, str]:
     """Load and parse input from file or stdin.
 
     Args:
@@ -122,21 +124,24 @@ def load_input(filename: Path | None) -> tuple[Any, str]:
     use_stdin = filename is None or str(filename) == "-"
     source_name = "<stdin>" if use_stdin else str(filename)
 
-    if not use_stdin and not filename.is_file():
-        stderr.print(f"Error: '{filename}' is not a file.")
-        sys.exit(1)
+    if not use_stdin:
+        assert filename is not None  # Type narrowing for mypy
+        if not filename.is_file():
+            stderr.print(f"Error: '{filename}' is not a file.")
+            sys.exit(1)
 
     # Use YAML-1.2-compliant loader (YAML-1.2 dropped support for yes/no boolean values)
     if use_stdin:
         data = yaml.load(sys.stdin, Loader=CoreLoader)
     else:
+        assert filename is not None  # Type narrowing for mypy
         with filename.open("r", encoding="utf-8") as f:
             data = yaml.load(f, Loader=CoreLoader)
 
     return data, source_name
 
 
-def perform_validation(data: Any, model_type: Any) -> None:  # noqa: ANN401
+def perform_validation(data: dict | list, model_type: UnionType) -> None:
     """Validate data based on its structure.
 
     Handles single features, lists of features, and GeoJSON FeatureCollections.
@@ -243,14 +248,15 @@ def validate(
             total_items = max_index + 1
 
             # Count items with errors per type
-            items_with_errors_by_type: dict[type[BaseModel], set[int]] = {}
+            items_with_errors_by_type: dict[builtins.type[BaseModel], set[int]] = {}
             for err in filtered_errors:
                 idx = get_item_index(err["loc"])
                 if idx is not None and idx in item_types:
                     model_type_cls = item_types[idx]
-                    if model_type_cls not in items_with_errors_by_type:
-                        items_with_errors_by_type[model_type_cls] = set()
-                    items_with_errors_by_type[model_type_cls].add(idx)
+                    if model_type_cls is not None:
+                        if model_type_cls not in items_with_errors_by_type:
+                            items_with_errors_by_type[model_type_cls] = set()
+                        items_with_errors_by_type[model_type_cls].add(idx)
 
             # Count items without any errors
             items_without_errors = total_items - len(
@@ -356,6 +362,7 @@ def validate(
 )
 @click.option(
     "--type",
+    "type_",
     multiple=True,
     help="Specific type to generate schema for (e.g., building, segment)",
 )
@@ -363,11 +370,11 @@ def json_schema_command(
     overture_types: bool,
     namespace: str | None,
     theme: tuple[str, ...],
-    type: tuple[str, ...],
+    type_: tuple[str, ...],
 ) -> None:
     """Generate JSON schema for Overture Maps types."""
     try:
-        model_type = resolve_types(overture_types, namespace, theme, type)
+        model_type = resolve_types(overture_types, namespace, theme, type_)
         schema = json_schema(model_type)
         # Use plain print for JSON output to avoid Rich formatting
         print(json.dumps(schema, indent=2, sort_keys=True))
