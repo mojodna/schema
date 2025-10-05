@@ -132,23 +132,18 @@ def load_input(filename: Path | None) -> tuple[dict | list, str]:
         yaml.YAMLError: If input is invalid YAML/JSON
         SystemExit: If filename doesn't exist or isn't a file
     """
-    use_stdin = filename is None or str(filename) == "-"
-    source_name = get_source_name(filename)
+    if filename is None or str(filename) == "-":
+        data = yaml.load(sys.stdin, Loader=CoreLoader)
+        return data, "<stdin>"
 
-    if not use_stdin:
-        assert filename is not None  # Type narrowing for mypy
-        if not filename.is_file():
-            raise click.UsageError(f"'{filename}' is not a file.")
+    if not filename.is_file():
+        raise click.UsageError(f"'{filename}' is not a file.")
 
     # Use YAML-1.2-compliant loader (YAML-1.2 dropped support for yes/no boolean values)
-    if use_stdin:
-        data = yaml.load(sys.stdin, Loader=CoreLoader)
-    else:
-        assert filename is not None  # Type narrowing for mypy
-        with filename.open("r", encoding="utf-8") as f:
-            data = yaml.load(f, Loader=CoreLoader)
+    with filename.open("r", encoding="utf-8") as f:
+        data = yaml.load(f, Loader=CoreLoader)
 
-    return data, source_name
+    return data, str(filename)
 
 
 def perform_validation(data: dict | list, model_type: UnionType) -> None:
@@ -406,7 +401,7 @@ def json_schema_command(
         # Use plain print for JSON output to avoid Rich formatting
         print(json.dumps(schema, indent=2, sort_keys=True))
     except ValueError as e:
-        raise click.UsageError(str(e))
+        raise click.UsageError(str(e)) from e
 
 
 def dump_namespace(
