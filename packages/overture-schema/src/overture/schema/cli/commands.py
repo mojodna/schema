@@ -162,6 +162,158 @@ def perform_validation(data: dict | list, model_type: UnionType) -> None:
         validate_feature(data, model_type)
 
 
+def handle_validation_error(
+    e: ValidationError, model_type: UnionType, stderr: Console
+) -> None:
+    """Handle and format validation errors.
+
+    Args:
+        e: ValidationError from pydantic
+        model_type: Union type used for validation
+        stderr: Console for stderr output
+    """
+    stderr.print("Validation failed:", style="red")
+    stderr.print()
+
+    # Compute metadata once upfront
+    metadata = introspect_union(model_type)
+
+    # Group errors by discriminator path and select most likely group(s)
+    error_groups = group_errors_by_discriminator(e.errors(), metadata)
+    filtered_errors, is_tied, is_heterogeneous, item_types = select_most_likely_errors(
+        error_groups, metadata=metadata, all_errors=e.errors()
+    )
+
+    # Show heterogeneity warning with statistics if collection has mixed types
+    if is_heterogeneous:
+        from collections import Counter
+
+        stderr.print(
+            "  ⚠ Heterogeneous collection: Data contains multiple feature types.",
+            style="yellow",
+        )
+        stderr.print(
+            "    • Consider validating each type separately with --theme or --type",
+            style="dim",
+        )
+        stderr.print()
+
+        # Compute statistics: group items by type
+        type_counts = Counter(item_types.values())
+
+        # Determine total number of items (max index + 1, or count from data)
+        max_index = max(item_types.keys()) if item_types else -1
+        total_items = max_index + 1
+
+        # Count items with errors per type
+        items_with_errors_by_type: dict[builtins.type[BaseModel], set[int]] = {}
+        for err in filtered_errors:
+            idx = get_item_index(err["loc"])
+            if idx is not None and idx in item_types:
+                model_type_cls = item_types[idx]
+                if model_type_cls is not None:
+                    if model_type_cls not in items_with_errors_by_type:
+                        items_with_errors_by_type[model_type_cls] = set()
+                    items_with_errors_by_type[model_type_cls].add(idx)
+
+        # Count items without any errors
+        items_without_errors = total_items - len(
+            {
+                idx
+                for idx in item_types.keys()
+                if any(get_item_index(err["loc"]) == idx for err in filtered_errors)
+            }
+        )
+
+        stderr.print("  [dim]Collection statistics:[/dim]")
+
+        # Show items without errors first
+        # TODO: Once we switch to parse_features (instead of validate_features),
+        # we can include type information for items without errors by parsing
+        # the input and tracking which items validated successfully and their types.
+        # This would allow output like: "Building: 2 confirmed (no errors)"
+        if items_without_errors > 0:
+            stderr.print(
+                f"    • {items_without_errors} item{'s' if items_without_errors != 1 else ''} with no errors",
+                style="dim",
+            )
+
+        # Show per-type statistics
+        for model_type_cls, count in type_counts.most_common():
+            if model_type_cls is not None:
+                items_with_errors = len(
+                    items_with_errors_by_type.get(model_type_cls, set())
+                )
+                valid_count = count - items_with_errors
+
+                if valid_count > 0:
+                    stderr.print(
+                        f"    • {model_type_cls.__name__}: {valid_count} confirmed, {items_with_errors} with errors",
+                        style="dim",
+                    )
+                else:
+                    stderr.print(
+                        f"    • {model_type_cls.__name__} (probable): {items_with_errors} item{'s' if items_with_errors != 1 else ''} with errors",
+                        style="dim",
+                    )
+        stderr.print()
+
+    # Show tie indicator if multiple groups had same error count
+    elif is_tied:
+        stderr.print(
+            "  ⚠ Ambiguous: Data matches multiple types equally. Consider:",
+            style="yellow",
+        )
+        stderr.print(
+            "    • Specifying --theme or --type to narrow validation", style="dim"
+        )
+        stderr.print("    • Adding discriminator fields to clarify intent", style="dim")
+        stderr.print()
+
+    # Display the most likely errors
+    for i, error in enumerate(filtered_errors):
+        # Always determine the item type if available
+        error_item_type = None
+        item_idx = get_item_index(error["loc"])
+        if item_idx is not None:
+            error_item_type = item_types.get(item_idx)
+
+        # Show model hint only for the first error (and only for non-heterogeneous)
+        format_validation_error(
+            error,
+            stderr,
+            metadata=metadata,
+            show_model_hint=(i == 0 and not is_heterogeneous),
+            item_type=error_item_type,
+            show_item_type=is_heterogeneous,
+        )
+
+
+def handle_generic_error(e: Exception, filename: Path | None, error_type: str) -> None:
+    """Handle generic errors during validation.
+
+    Args:
+        e: Exception that occurred
+        filename: Input filename or None for stdin
+        error_type: Type of error for user-friendly message
+
+    Raises:
+        click.UsageError: Always, with formatted error message
+    """
+    source_name = (
+        "<stdin>" if (filename is None or str(filename) == "-") else str(filename)
+    )
+
+    if error_type == "yaml":
+        raise click.UsageError(f"'{source_name}' contains invalid input: {e}")
+    elif error_type == "value":
+        raise click.UsageError(str(e))
+    elif error_type == "key":
+        raise click.UsageError(f"Invalid data structure - missing key: {e}")
+    else:
+        raise click.UsageError(f"Error processing {source_name}: {e}")
+
+
 @cli.command()
 @click.argument("filename", type=click.Path(path_type=Path), required=False)
 @click.option(
@@ -198,146 +350,16 @@ def validate(
         model_type = resolve_types(overture_types, namespace, theme, type)
         data, source_name = load_input(filename)
         perform_validation(data, model_type)
-
         stdout.print(f"✓ Successfully validated {source_name}")
-
     except yaml.YAMLError as e:
-        # Get source name for error message
-        source_name = (
-            "<stdin>" if (filename is None or str(filename) == "-") else str(filename)
-        )
-        raise click.UsageError(f"'{source_name}' contains invalid input: {e}")
-
+        handle_generic_error(e, filename, "yaml")
     except ValidationError as e:
-        stderr.print("Validation failed:", style="red")
-        stderr.print()
-
-        # Compute metadata once upfront
-        metadata = introspect_union(model_type)
-
-        # Group errors by discriminator path and select most likely group(s)
-        error_groups = group_errors_by_discriminator(e.errors(), metadata)
-        filtered_errors, is_tied, is_heterogeneous, item_types = (
-            select_most_likely_errors(
-                error_groups, metadata=metadata, all_errors=e.errors()
-            )
-        )
-
-        # Show heterogeneity warning with statistics if collection has mixed types
-        if is_heterogeneous:
-            from collections import Counter
-
-            stderr.print(
-                "  ⚠ Heterogeneous collection: Data contains multiple feature types.",
-                style="yellow",
-            )
-            stderr.print(
-                "    • Consider validating each type separately with --theme or --type",
-                style="dim",
-            )
-            stderr.print()
-
-            # Compute statistics: group items by type
-            type_counts = Counter(item_types.values())
-
-            # Determine total number of items (max index + 1, or count from data)
-            max_index = max(item_types.keys()) if item_types else -1
-            total_items = max_index + 1
-
-            # Count items with errors per type
-            items_with_errors_by_type: dict[builtins.type[BaseModel], set[int]] = {}
-            for err in filtered_errors:
-                idx = get_item_index(err["loc"])
-                if idx is not None and idx in item_types:
-                    model_type_cls = item_types[idx]
-                    if model_type_cls is not None:
-                        if model_type_cls not in items_with_errors_by_type:
-                            items_with_errors_by_type[model_type_cls] = set()
-                        items_with_errors_by_type[model_type_cls].add(idx)
-
-            # Count items without any errors
-            items_without_errors = total_items - len(
-                {
-                    idx
-                    for idx in item_types.keys()
-                    if any(get_item_index(err["loc"]) == idx for err in filtered_errors)
-                }
-            )
-
-            stderr.print("  [dim]Collection statistics:[/dim]")
-
-            # Show items without errors first
-            # TODO: Once we switch to parse_features (instead of validate_features),
-            # we can include type information for items without errors by parsing
-            # the input and tracking which items validated successfully and their types.
-            # This would allow output like: "Building: 2 confirmed (no errors)"
-            if items_without_errors > 0:
-                stderr.print(
-                    f"    • {items_without_errors} item{'s' if items_without_errors != 1 else ''} with no errors",
-                    style="dim",
-                )
-
-            # Show per-type statistics
-            for model_type_cls, count in type_counts.most_common():
-                if model_type_cls is not None:
-                    items_with_errors = len(
-                        items_with_errors_by_type.get(model_type_cls, set())
-                    )
-                    valid_count = count - items_with_errors
-
-                    if valid_count > 0:
-                        stderr.print(
-                            f"    • {model_type_cls.__name__}: {valid_count} confirmed, {items_with_errors} with errors",
-                            style="dim",
-                        )
-                    else:
-                        stderr.print(
-                            f"    • {model_type_cls.__name__} (probable): {items_with_errors} item{'s' if items_with_errors != 1 else ''} with errors",
-                            style="dim",
-                        )
-            stderr.print()
-
-        # Show tie indicator if multiple groups had same error count
-        elif is_tied:
-            stderr.print(
-                "  ⚠ Ambiguous: Data matches multiple types equally. Consider:",
-                style="yellow",
-            )
-            stderr.print(
-                "    • Specifying --theme or --type to narrow validation", style="dim"
-            )
-            stderr.print(
-                "    • Adding discriminator fields to clarify intent", style="dim"
-            )
-            stderr.print()
-
-        # Display the most likely errors
-        for i, error in enumerate(filtered_errors):
-            # Always determine the item type if available
-            error_item_type = None
-            item_idx = get_item_index(error["loc"])
-            if item_idx is not None:
-                error_item_type = item_types.get(item_idx)
-
-            # Show model hint only for the first error (and only for non-heterogeneous)
-            format_validation_error(
-                error,
-                stderr,
-                metadata=metadata,
-                show_model_hint=(i == 0 and not is_heterogeneous),
-                item_type=error_item_type,
-                show_item_type=is_heterogeneous,
-            )
-
+        handle_validation_error(e, model_type, stderr)
         sys.exit(1)
-
     except ValueError as e:
-        # User error (e.g., no models found matching criteria)
-        raise click.UsageError(str(e))
-
+        handle_generic_error(e, filename, "value")
     except KeyError as e:
-        # Data structure error (e.g., missing "features" in FeatureCollection)
-        raise click.UsageError(f"Invalid data structure - missing key: {e}")
+        handle_generic_error(e, filename, "key")
 
 
 @cli.command("json-schema")
