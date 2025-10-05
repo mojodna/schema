@@ -337,6 +337,7 @@ def handle_generic_error(e: Exception, filename: Path | None, error_type: str) -
 )
 @click.option(
     "--type",
+    "types",
     multiple=True,
     help="Specific type to validate against (e.g., building, segment)",
 )
@@ -345,14 +346,14 @@ def validate(
     overture_types: bool,
     namespace: str | None,
     theme: tuple[str, ...],
-    type: tuple[str, ...],
+    types: tuple[str, ...],
 ) -> None:
     """Validate Overture Maps data against schemas.
 
     Read from FILENAME or stdin if FILENAME is '-' or not provided.
     """
     try:
-        model_type = resolve_types(overture_types, namespace, theme, type)
+        model_type = resolve_types(overture_types, namespace, theme, types)
         data, source_name = load_input(filename)
         perform_validation(data, model_type)
         stdout.print(f"✓ Successfully validated {source_name}")
@@ -384,7 +385,7 @@ def validate(
 )
 @click.option(
     "--type",
-    "type_",
+    "types",
     multiple=True,
     help="Specific type to generate schema for (e.g., building, segment)",
 )
@@ -392,11 +393,11 @@ def json_schema_command(
     overture_types: bool,
     namespace: str | None,
     theme: tuple[str, ...],
-    type_: tuple[str, ...],
+    types: tuple[str, ...],
 ) -> None:
     """Generate JSON schema for Overture Maps types."""
     try:
-        model_type = resolve_types(overture_types, namespace, theme, type_)
+        model_type = resolve_types(overture_types, namespace, theme, types)
         schema = json_schema(model_type)
         # Use plain print for JSON output to avoid Rich formatting
         print(json.dumps(schema, indent=2, sort_keys=True))
