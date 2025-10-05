@@ -267,7 +267,6 @@ features:
     def test_validate_with_nonexistent_filters_raises_error(
         self,
         cli_runner: CliRunner,
-        stderr_buffer: StringIO,
         building_feature_yaml_content: str,
     ) -> None:
         """Test that validation with filters matching no models raises a clear error."""
@@ -277,14 +276,13 @@ features:
             ["validate", "--theme", "nonexistent_theme"],
             input=building_feature_yaml_content,
         )
-        assert result.exit_code == 1
-        stderr_output = stderr_buffer.getvalue()
-        assert "No models found matching the specified criteria" in stderr_output
+        # UsageError exits with code 2
+        assert result.exit_code == 2
+        assert "No models found matching the specified criteria" in result.output
 
     def test_validate_with_nonexistent_type_raises_error(
         self,
         cli_runner: CliRunner,
-        stderr_buffer: StringIO,
         building_feature_yaml_content: str,
     ) -> None:
         """Test that validation with nonexistent type raises a clear error."""
@@ -294,14 +292,13 @@ features:
             ["validate", "--type", "nonexistent_type"],
             input=building_feature_yaml_content,
         )
-        assert result.exit_code == 1
-        stderr_output = stderr_buffer.getvalue()
-        assert "No models found matching the specified criteria" in stderr_output
+        # UsageError exits with code 2
+        assert result.exit_code == 2
+        assert "No models found matching the specified criteria" in result.output
 
     def test_validate_with_valid_theme_invalid_type_raises_error(
         self,
         cli_runner: CliRunner,
-        stderr_buffer: StringIO,
         building_feature_yaml_content: str,
     ) -> None:
         """Test that validation with valid theme but invalid type raises an error."""
@@ -311,6 +308,6 @@ features:
             ["validate", "--theme", "buildings", "--type", "segment"],
             input=building_feature_yaml_content,
         )
-        assert result.exit_code == 1
-        stderr_output = stderr_buffer.getvalue()
-        assert "No models found matching the specified criteria" in stderr_output
+        # UsageError exits with code 2
+        assert result.exit_code == 2
+        assert "No models found matching the specified criteria" in result.output

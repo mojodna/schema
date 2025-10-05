@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from click.exceptions import UsageError
 from overture.schema.cli.commands import load_input, perform_validation, resolve_types
 from pydantic import ValidationError
 
@@ -16,26 +17,28 @@ class TestLoadInput:
     """
 
     def test_load_input_file_not_found(self) -> None:
-        """Test that load_input exits when file doesn't exist."""
-        with pytest.raises(SystemExit) as exc_info:
+        """Test that load_input raises UsageError when file doesn't exist."""
+
+        with pytest.raises(UsageError) as exc_info:
             load_input(Path("/nonexistent/path/to/file.yaml"))
 
-        assert exc_info.value.code == 1
+        assert "is not a file" in str(exc_info.value)
 
     def test_load_input_path_is_directory(
         self, cli_runner: pytest.FixtureRequest
     ) -> None:
-        """Test that load_input exits when path is a directory.
+        """Test that load_input raises UsageError when path is a directory.
 
         Note: cli_runner provides isolated filesystem for test file creation.
         """
+
         # Create a directory
         Path("testdir").mkdir()
 
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(UsageError) as exc_info:
             load_input(Path("testdir"))
 
-        assert exc_info.value.code == 1
+        assert "is not a file" in str(exc_info.value)
 
     def test_load_input_invalid_yaml(self, cli_runner: pytest.FixtureRequest) -> None:
         """Test that load_input raises YAMLError for invalid YAML.

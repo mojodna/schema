@@ -126,8 +126,7 @@ def load_input(filename: Path | None) -> tuple[dict | list, str]:
     if not use_stdin:
         assert filename is not None  # Type narrowing for mypy
         if not filename.is_file():
-            stderr.print(f"Error: '{filename}' is not a file.")
-            sys.exit(1)
+            raise click.UsageError(f"'{filename}' is not a file.")
 
     # Use YAML-1.2-compliant loader (YAML-1.2 dropped support for yes/no boolean values)
     if use_stdin:
@@ -207,8 +206,7 @@ def validate(
         source_name = (
             "<stdin>" if (filename is None or str(filename) == "-") else str(filename)
         )
-        stderr.print(f"Error: '{source_name}' contains invalid input: {e}")
-        sys.exit(1)
+        raise click.UsageError(f"'{source_name}' contains invalid input: {e}")
 
     except ValidationError as e:
         stderr.print("Validation failed:", style="red")
@@ -335,13 +333,11 @@ def validate(
 
     except ValueError as e:
         # User error (e.g., no models found matching criteria)
-        stderr.print(f"Error: {e}")
-        sys.exit(1)
+        raise click.UsageError(str(e))
 
     except KeyError as e:
         # Data structure error (e.g., missing "features" in FeatureCollection)
-        stderr.print(f"Error: Invalid data structure - missing key: {e}")
-        sys.exit(1)
+        raise click.UsageError(f"Invalid data structure - missing key: {e}")
 
 
 @cli.command("json-schema")
@@ -378,8 +374,7 @@ def json_schema_command(
         # Use plain print for JSON output to avoid Rich formatting
         print(json.dumps(schema, indent=2, sort_keys=True))
     except ValueError as e:
-        click.echo(f"Error: {e}", err=True)
-        sys.exit(1)
+        raise click.UsageError(str(e))
 
 
 def dump_namespace(
