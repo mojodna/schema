@@ -1,7 +1,7 @@
 from types import UnionType
 from typing import Any, cast
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 from ._cache import get_type_adapter
 

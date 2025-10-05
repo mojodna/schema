@@ -22,7 +22,9 @@ class TestLoadInput:
 
         assert exc_info.value.code == 1
 
-    def test_load_input_path_is_directory(self, cli_runner) -> None:
+    def test_load_input_path_is_directory(
+        self, cli_runner: pytest.FixtureRequest
+    ) -> None:
         """Test that load_input exits when path is a directory.
 
         Note: cli_runner provides isolated filesystem for test file creation.
@@ -35,7 +37,7 @@ class TestLoadInput:
 
         assert exc_info.value.code == 1
 
-    def test_load_input_invalid_yaml(self, cli_runner) -> None:
+    def test_load_input_invalid_yaml(self, cli_runner: pytest.FixtureRequest) -> None:
         """Test that load_input raises YAMLError for invalid YAML.
 
         Note: cli_runner provides isolated filesystem for test file creation.
@@ -47,7 +49,7 @@ class TestLoadInput:
         with pytest.raises(yaml.YAMLError):
             load_input(Path(invalid_yaml))
 
-    def test_load_input_handles_json(self, cli_runner) -> None:
+    def test_load_input_handles_json(self, cli_runner: pytest.FixtureRequest) -> None:
         """Test that load_input can parse JSON files.
 
         Note: cli_runner provides isolated filesystem for test file creation.
@@ -64,7 +66,7 @@ class TestLoadInput:
         assert data["id"] == "test"
         assert source_name == json_file
 
-    def test_load_input_handles_list(self, cli_runner) -> None:
+    def test_load_input_handles_list(self, cli_runner: pytest.FixtureRequest) -> None:
         """Test that load_input can parse YAML lists.
 
         Note: cli_runner provides isolated filesystem for test file creation.
@@ -146,7 +148,7 @@ class TestPerformValidation:
         ],
     )
     def test_perform_validation_raises_for_invalid_data(
-        self, data, expected_in_loc
+        self, data: dict | list, expected_in_loc: str | int
     ) -> None:
         """Test that perform_validation raises ValidationError with proper error location."""
         model_type = resolve_types(False, None, ("buildings",), ())

@@ -1,7 +1,5 @@
 """Error formatting and grouping for validation errors."""
 
-from typing import Any
-
 from pydantic import BaseModel
 from rich.console import Console
 
@@ -12,7 +10,7 @@ from .type_analysis import (
     get_item_index,
     infer_model_from_error,
 )
-from .types import ErrorLocation, UnionType, ValidationErrorDict
+from .types import ErrorLocation, ValidationErrorDict
 
 
 def group_errors_by_discriminator(
@@ -127,7 +125,7 @@ def analyze_collection_heterogeneity(
             item_types[item_idx] = None
 
     # Check if the collection is heterogeneous
-    unique_types = set(t for t in item_types.values() if t is not None)
+    unique_types = {t for t in item_types.values() if t is not None}
     is_heterogeneous = len(unique_types) > 1
 
     return item_types, is_heterogeneous

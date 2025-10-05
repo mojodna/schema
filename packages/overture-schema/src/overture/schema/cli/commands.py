@@ -4,7 +4,6 @@ import builtins
 import json
 import sys
 from pathlib import Path
-from typing import Type
 
 import click
 import yaml
@@ -260,11 +259,11 @@ def validate(
 
             # Count items without any errors
             items_without_errors = total_items - len(
-                set(
+                {
                     idx
                     for idx in item_types.keys()
                     if any(get_item_index(err["loc"]) == idx for err in filtered_errors)
-                )
+                }
             )
 
             stderr.print("  [dim]Collection statistics:[/dim]")

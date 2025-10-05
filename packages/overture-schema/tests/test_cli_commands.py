@@ -1,14 +1,11 @@
 """Tests for CLI commands (validate, list-types, json-schema)."""
 
 import json
-from collections.abc import Generator
 from io import StringIO
-from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
 from overture.schema.cli.commands import cli
-from rich.console import Console
 
 
 class TestListTypesCommand:
