@@ -199,10 +199,8 @@ def handle_validation_error(
         error_groups, metadata=metadata, all_errors=e.errors()
     )
 
-    # Show heterogeneity warning with statistics if collection has mixed types
+    # Show heterogeneity warning if collection has mixed types
     if is_heterogeneous:
-        from collections import Counter
-
         stderr.print(
             "  ⚠ Heterogeneous collection: Data contains multiple feature types.",
             style="yellow",
@@ -213,65 +211,69 @@ def handle_validation_error(
         )
         stderr.print()
 
-        # Compute statistics: group items by type
-        type_counts = Counter(item_types.values())
+        # Only compute statistics if there are errors to report
+        if filtered_errors:
+            from collections import Counter
 
-        # Determine total number of items (max index + 1, or count from data)
-        max_index = max(item_types.keys()) if item_types else -1
-        total_items = max_index + 1
+            # Compute statistics: group items by type
+            type_counts = Counter(item_types.values())
 
-        # Count items with errors per type
-        items_with_errors_by_type: dict[builtins.type[BaseModel], set[int]] = {}
-        for err in filtered_errors:
-            idx = get_item_index(err["loc"])
-            if idx is not None and idx in item_types:
-                model_type_cls = item_types[idx]
-                if model_type_cls is not None:
-                    if model_type_cls not in items_with_errors_by_type:
-                        items_with_errors_by_type[model_type_cls] = set()
-                    items_with_errors_by_type[model_type_cls].add(idx)
+            # Determine total number of items (max index + 1, or count from data)
+            max_index = max(item_types.keys()) if item_types else -1
+            total_items = max_index + 1
 
-        # Count items without any errors
-        items_without_errors = total_items - len(
-            {
-                idx
-                for idx in item_types.keys()
-                if any(get_item_index(err["loc"]) == idx for err in filtered_errors)
-            }
-        )
+            # Count items with errors per type
+            items_with_errors_by_type: dict[builtins.type[BaseModel], set[int]] = {}
+            for err in filtered_errors:
+                idx = get_item_index(err["loc"])
+                if idx is not None and idx in item_types:
+                    model_type_cls = item_types[idx]
+                    if model_type_cls is not None:
+                        if model_type_cls not in items_with_errors_by_type:
+                            items_with_errors_by_type[model_type_cls] = set()
+                        items_with_errors_by_type[model_type_cls].add(idx)
 
-        stderr.print("  [dim]Collection statistics:[/dim]")
-
-        # Show items without errors first
-        # TODO: Once we switch to parse_features (instead of validate_features),
-        # we can include type information for items without errors by parsing
-        # the input and tracking which items validated successfully and their types.
-        # This would allow output like: "Building: 2 confirmed (no errors)"
-        if items_without_errors > 0:
-            stderr.print(
-                f"    • {items_without_errors} item{'s' if items_without_errors != 1 else ''} with no errors",
-                style="dim",
+            # Count items without any errors
+            items_without_errors = total_items - len(
+                {
+                    idx
+                    for idx in item_types.keys()
+                    if any(get_item_index(err["loc"]) == idx for err in filtered_errors)
+                }
             )
 
-        # Show per-type statistics
-        for model_type_cls, count in type_counts.most_common():
-            if model_type_cls is not None:
-                items_with_errors = len(
-                    items_with_errors_by_type.get(model_type_cls, set())
-                )
-                valid_count = count - items_with_errors
+            stderr.print("  [dim]Collection statistics:[/dim]")
 
-                if valid_count > 0:
-                    stderr.print(
-                        f"    • {model_type_cls.__name__}: {valid_count} confirmed, {items_with_errors} with errors",
-                        style="dim",
+            # Show items without errors first
+            # TODO: Once we switch to parse_features (instead of validate_features),
+            # we can include type information for items without errors by parsing
+            # the input and tracking which items validated successfully and their types.
+            # This would allow output like: "Building: 2 confirmed (no errors)"
+            if items_without_errors > 0:
+                stderr.print(
+                    f"    • {items_without_errors} item{'s' if items_without_errors != 1 else ''} with no errors",
+                    style="dim",
+                )
+
+            # Show per-type statistics
+            for model_type_cls, count in type_counts.most_common():
+                if model_type_cls is not None:
+                    items_with_errors = len(
+                        items_with_errors_by_type.get(model_type_cls, set())
                     )
-                else:
-                    stderr.print(
-                        f"    • {model_type_cls.__name__} (probable): {items_with_errors} item{'s' if items_with_errors != 1 else ''} with errors",
-                        style="dim",
-                    )
-        stderr.print()
+                    valid_count = count - items_with_errors
+
+                    if valid_count > 0:
+                        stderr.print(
+                            f"    • {model_type_cls.__name__}: {valid_count} confirmed, {items_with_errors} with errors",
+                            style="dim",
+                        )
+                    else:
+                        stderr.print(
+                            f"    • {model_type_cls.__name__} (probable): {items_with_errors} item{'s' if items_with_errors != 1 else ''} with errors",
+                            style="dim",
+                        )
+            stderr.print()
 
     # Show tie indicator if multiple groups had same error count
     elif is_tied:
