@@ -2,6 +2,7 @@
 
 from collections.abc import Generator
 from io import StringIO
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -77,8 +78,8 @@ def build_feature(
     coordinates: list | None = None,
     version: int = 0,
     geojson_format: bool = True,
-    **properties,
-):
+    **properties: Any,
+) -> dict[str, Any]:
     """Build a feature dictionary with the specified parameters.
 
     Args:
@@ -109,6 +110,7 @@ def build_feature(
 
     geometry = {"type": geometry_type, "coordinates": coordinates}
 
+    feature: dict[str, Any]
     if geojson_format:
         # GeoJSON format: properties nested under "properties" key
         feature = {
