@@ -5,6 +5,7 @@ from io import StringIO
 
 import pytest
 from click.testing import CliRunner
+from conftest import build_feature
 from overture.schema.cli.commands import cli
 
 
@@ -53,17 +54,10 @@ class TestValidateCommand:
 
     def test_validate_flat_format_input(self, cli_runner: CliRunner) -> None:
         """Test that validation works with flat (non-GeoJSON) format."""
-        flat_yaml = """
-id: test
-geometry:
-  type: Polygon
-  coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
-theme: buildings
-type: building
-version: 0
-"""
+        flat_feature = build_feature(geojson_format=False)
+        flat_json = json.dumps(flat_feature)
         result = cli_runner.invoke(
-            cli, ["validate", "--theme", "buildings"], input=flat_yaml
+            cli, ["validate", "--theme", "buildings"], input=flat_json
         )
         assert result.exit_code == 0
         assert "Successfully validated <stdin>" in result.output
@@ -106,38 +100,22 @@ version: 0
         self, cli_runner: CliRunner
     ) -> None:
         """Test validation error for invalid type value."""
-        invalid_type_yaml = """
-id: test
-type: Feature
-geometry:
-  type: Polygon
-  coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
-properties:
-  theme: buildings
-  type: invalid_type
-  version: 0
-"""
-        result = cli_runner.invoke(cli, ["validate"], input=invalid_type_yaml)
+        invalid_feature = build_feature(type="invalid_type")
+        invalid_type_json = json.dumps(invalid_feature)
+        result = cli_runner.invoke(cli, ["validate"], input=invalid_type_json)
         assert result.exit_code == 1
 
     def test_validate_error_with_nested_field(self, cli_runner: CliRunner) -> None:
         """Test validation error message includes nested field path."""
-        nested_field_yaml = """
-id: test
-type: Feature
-geometry:
-  type: Polygon
-  coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
-properties:
-  theme: buildings
-  type: building
-  version: 0
-  names:
-    common:
-      - value: "Test Building"
-        language: invalid_language_code
-"""
-        result = cli_runner.invoke(cli, ["validate"], input=nested_field_yaml)
+        feature = build_feature(
+            names={
+                "common": [
+                    {"value": "Test Building", "language": "invalid_language_code"}
+                ]
+            }
+        )
+        nested_field_json = json.dumps(feature)
+        result = cli_runner.invoke(cli, ["validate"], input=nested_field_json)
         assert result.exit_code == 1
 
     @pytest.mark.parametrize(
@@ -178,29 +156,13 @@ properties:
         check_index: bool,
     ) -> None:
         """Test validation of a list of features (success and error cases)."""
-        # Second feature conditionally includes 'id' field
-        id_field = "" if has_error else "id: test2"
-        feature_list = f"""
-- id: test1
-  type: Feature
-  geometry:
-    type: Polygon
-    coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
-  properties:
-    theme: buildings
-    type: building
-    version: 0
-- {id_field}
-  type: Feature
-  geometry:
-    type: Polygon
-    coordinates: [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
-  properties:
-    theme: buildings
-    type: building
-    version: 0
-"""
-        result = cli_runner.invoke(cli, ["validate"], input=feature_list)
+        feature1 = build_feature(id="test1")
+        feature2_id = None if has_error else "test2"
+        feature2 = build_feature(
+            id=feature2_id, coordinates=[[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
+        )
+        feature_list_json = json.dumps([feature1, feature2])
+        result = cli_runner.invoke(cli, ["validate"], input=feature_list_json)
         assert result.exit_code == expected_exit_code
 
         if check_index:
@@ -227,32 +189,18 @@ properties:
         expected_exit_code: int,
     ) -> None:
         """Test validation of a GeoJSON FeatureCollection with various validity states."""
-        first_id = "id: test1" if first_feature_valid else ""
-        second_id = "id: test2" if second_feature_valid else ""
-
-        feature_collection = f"""
-type: FeatureCollection
-features:
-  - {first_id}
-    type: Feature
-    geometry:
-      type: Polygon
-      coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
-    properties:
-      theme: buildings
-      type: building
-      version: 0
-  - {second_id}
-    type: Feature
-    geometry:
-      type: Polygon
-      coordinates: [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
-    properties:
-      theme: buildings
-      type: building
-      version: 0
-"""
-        result = cli_runner.invoke(cli, ["validate"], input=feature_collection)
+        feature1 = build_feature(id="test1" if first_feature_valid else None)
+        feature2 = build_feature(
+            id="test2" if second_feature_valid else None,
+            coordinates=[[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]],
+        )
+        feature_collection = {
+            "type": "FeatureCollection",
+            "features": [feature1, feature2],
+        }
+        result = cli_runner.invoke(
+            cli, ["validate"], input=json.dumps(feature_collection)
+        )
         assert result.exit_code == expected_exit_code
 
         if expected_exit_code == 0:

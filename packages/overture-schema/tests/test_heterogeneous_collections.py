@@ -1,100 +1,75 @@
 """Tests for heterogeneous collection validation."""
 
+import json
 from io import StringIO
 
 import pytest
 from click.testing import CliRunner
+from conftest import build_feature
 from overture.schema.cli.commands import cli
 
 
 @pytest.fixture
-def heterogeneous_collection_yaml() -> str:
+def heterogeneous_collection_json() -> str:
     """A collection mixing buildings and places."""
-    return """
-- id: building-1
-  type: Feature
-  geometry:
-    type: Polygon
-    coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
-  properties:
-    theme: buildings
-    type: building
-    version: 0
-- id: place-1
-  type: Feature
-  geometry:
-    type: Point
-    coordinates: [0.5, 0.5]
-  properties:
-    theme: places
-    type: place
-    version: 0
-    operating_status: open
-    categories:
-      primary: restaurant
-    names:
-      primary: "Valid Place"
-"""
+    building = build_feature(id="building-1", theme="buildings", type="building")
+    place = build_feature(
+        id="place-1",
+        theme="places",
+        type="place",
+        geometry_type="Point",
+        coordinates=[0.5, 0.5],
+        operating_status="open",
+        categories={"primary": "restaurant"},
+        names={"primary": "Valid Place"},
+    )
+    return json.dumps([building, place])
 
 
 @pytest.fixture
-def heterogeneous_with_missing_fields_yaml() -> str:
+def heterogeneous_with_missing_fields_json() -> str:
     """A collection where minority type has errors."""
-    return """
-- id: building-valid-1
-  type: Feature
-  geometry:
-    type: Polygon
-    coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
-  properties:
-    theme: buildings
-    type: building
-    version: 0
-    names:
-      primary: "Valid Building"
-- type: Feature
-  geometry:
-    type: Polygon
-    coordinates: [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
-  properties:
-    theme: buildings
-    type: building
-    version: 0
-    names:
-      primary: "Missing ID Building"
-- id: building-bad-geometry-3
-  type: Feature
-  geometry:
-    type: InvalidGeometryType
-    coordinates: [[[4, 4], [5, 4], [5, 5], [4, 5], [4, 4]]]
-  properties:
-    theme: buildings
-    type: building
-    version: 0
-- type: Feature
-  geometry:
-    type: Point
-    coordinates: [6.5, 6.5]
-  properties:
-    theme: places
-    type: place
-    version: 0
-    categories:
-      primary: restaurant
-    names:
-      primary: "Place missing required field"
-"""
+    building1 = build_feature(
+        id="building-valid-1",
+        theme="buildings",
+        type="building",
+        names={"primary": "Valid Building"},
+    )
+    building2 = build_feature(
+        id=None,  # Missing ID
+        theme="buildings",
+        type="building",
+        coordinates=[[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]],
+        names={"primary": "Missing ID Building"},
+    )
+    building3 = build_feature(
+        id="building-bad-geometry-3",
+        theme="buildings",
+        type="building",
+        geometry_type="InvalidGeometryType",
+        coordinates=[[[4, 4], [5, 4], [5, 5], [4, 5], [4, 4]]],
+    )
+    place = build_feature(
+        id=None,  # Missing ID
+        theme="places",
+        type="place",
+        geometry_type="Point",
+        coordinates=[6.5, 6.5],
+        categories={"primary": "restaurant"},
+        names={"primary": "Place missing required field"},
+    )
+    return json.dumps([building1, building2, building3, place])
 
 
 class TestHeterogeneousCollections:
     """Tests for heterogeneous collection handling."""
 
     def test_heterogeneous_collection_success(
-        self, cli_runner: CliRunner, heterogeneous_collection_yaml: str
+        self, cli_runner: CliRunner, heterogeneous_collection_json: str
     ) -> None:
         """Test that valid heterogeneous collections pass validation."""
         result = cli_runner.invoke(
-            cli, ["validate"], input=heterogeneous_collection_yaml
+            cli, ["validate"], input=heterogeneous_collection_json
         )
         assert result.exit_code == 0
         assert "Successfully validated" in result.output
@@ -102,12 +77,12 @@ class TestHeterogeneousCollections:
     def test_heterogeneous_collection_shows_all_errors(
         self,
         cli_runner: CliRunner,
-        heterogeneous_with_missing_fields_yaml: str,
+        heterogeneous_with_missing_fields_json: str,
         stderr_buffer: StringIO,
     ) -> None:
         """Test that errors from minority types are shown, not hidden."""
         result = cli_runner.invoke(
-            cli, ["validate"], input=heterogeneous_with_missing_fields_yaml
+            cli, ["validate"], input=heterogeneous_with_missing_fields_json
         )
         assert result.exit_code == 1
 
@@ -129,12 +104,12 @@ class TestHeterogeneousCollections:
     def test_heterogeneous_collection_warns_about_heterogeneity(
         self,
         cli_runner: CliRunner,
-        heterogeneous_with_missing_fields_yaml: str,
+        heterogeneous_with_missing_fields_json: str,
         stderr_buffer: StringIO,
     ) -> None:
         """Test that heterogeneous collections trigger a warning."""
         result = cli_runner.invoke(
-            cli, ["validate"], input=heterogeneous_with_missing_fields_yaml
+            cli, ["validate"], input=heterogeneous_with_missing_fields_json
         )
         assert result.exit_code == 1
 
@@ -150,26 +125,13 @@ class TestHeterogeneousCollections:
         self, cli_runner: CliRunner, stderr_buffer: StringIO
     ) -> None:
         """Test that homogeneous collections don't trigger heterogeneity warning."""
-        homogeneous_yaml = """
-- id: building-1
-  type: Feature
-  geometry:
-    type: Polygon
-    coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
-  properties:
-    theme: buildings
-    type: building
-    version: 0
-- type: Feature
-  geometry:
-    type: Polygon
-    coordinates: [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
-  properties:
-    theme: buildings
-    type: building
-    version: 0
-"""
-        result = cli_runner.invoke(cli, ["validate"], input=homogeneous_yaml)
+        building1 = build_feature(id="building-1")
+        building2 = build_feature(
+            id=None,  # Missing ID
+            coordinates=[[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]],
+        )
+        homogeneous_json = json.dumps([building1, building2])
+        result = cli_runner.invoke(cli, ["validate"], input=homogeneous_json)
         assert result.exit_code == 1  # Has error (missing id)
 
         stderr_output = stderr_buffer.getvalue()
@@ -187,34 +149,22 @@ class TestHeterogeneousCollections:
         # Create a collection where one item could be either type but is missing
         # fields that would make it valid for either. The majority type should
         # be used for interpretation.
-        ambiguous_yaml = """
-- id: building-1
-  type: Feature
-  geometry:
-    type: Polygon
-    coordinates: [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]]
-  properties:
-    theme: buildings
-    type: building
-    version: 0
-- id: building-2
-  type: Feature
-  geometry:
-    type: Polygon
-    coordinates: [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
-  properties:
-    theme: buildings
-    type: building
-    version: 0
-- id: ambiguous-3
-  type: Feature
-  geometry:
-    type: Polygon
-    coordinates: [[[4, 4], [5, 4], [5, 5], [4, 5], [4, 4]]]
-  properties:
-    version: 0
-"""
-        result = cli_runner.invoke(cli, ["validate"], input=ambiguous_yaml)
+        building1 = build_feature(id="building-1")
+        building2 = build_feature(
+            id="building-2", coordinates=[[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
+        )
+        # Ambiguous item - missing theme and type
+        ambiguous = {
+            "id": "ambiguous-3",
+            "type": "Feature",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[[4, 4], [5, 4], [5, 5], [4, 5], [4, 4]]],
+            },
+            "properties": {"version": 0},
+        }
+        ambiguous_json = json.dumps([building1, building2, ambiguous])
+        result = cli_runner.invoke(cli, ["validate"], input=ambiguous_json)
         assert result.exit_code == 1
 
         stderr_output = stderr_buffer.getvalue()

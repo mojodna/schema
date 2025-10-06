@@ -1,10 +1,12 @@
 """Tests for CLI helper functions (load_input, perform_validation)."""
 
+import json
 from pathlib import Path
 
 import pytest
 import yaml
 from click.exceptions import UsageError
+from conftest import build_feature
 from overture.schema.cli.commands import load_input, perform_validation, resolve_types
 from pydantic import ValidationError
 
@@ -58,10 +60,9 @@ class TestLoadInput:
         Note: cli_runner provides isolated filesystem for test file creation.
         """
         json_file = "test.json"
+        feature = build_feature()
         with open(json_file, "w") as f:
-            f.write(
-                '{"id": "test", "type": "Feature", "properties": {"type": "building"}}'
-            )
+            f.write(json.dumps(feature))
 
         data, source_name = load_input(Path(json_file))
 
@@ -75,13 +76,10 @@ class TestLoadInput:
         Note: cli_runner provides isolated filesystem for test file creation.
         """
         list_file = "list.yaml"
+        feature1 = build_feature(id="test1")
+        feature2 = build_feature(id="test2")
         with open(list_file, "w") as f:
-            f.write("""
-- id: test1
-  type: Feature
-- id: test2
-  type: Feature
-""")
+            f.write(yaml.dump([feature1, feature2]))
 
         data, source_name = load_input(Path(list_file))
 
@@ -104,10 +102,9 @@ class TestLoadInput:
         Note: cli_runner provides isolated filesystem for test file creation.
         """
         filename = f"data{extension}"
+        feature = build_feature()
         with open(filename, "w") as f:
-            f.write(
-                '{"id": "test", "type": "Feature", "properties": {"type": "building"}}'
-            )
+            f.write(json.dumps(feature))
 
         load_input(Path(filename))
 
@@ -131,10 +128,9 @@ class TestLoadInput:
         Note: cli_runner provides isolated filesystem for test file creation.
         """
         filename = f"data{extension}"
+        feature = build_feature()
         with open(filename, "w") as f:
-            f.write(
-                '{"id": "test", "type": "Feature", "properties": {"type": "building"}}'
-            )
+            f.write(json.dumps(feature))
 
         load_input(Path(filename))
 
@@ -150,69 +146,32 @@ class TestPerformValidation:
     cases and validation logic specific to the function.
     """
 
-    @pytest.mark.parametrize(
-        "data,expected_in_loc",
-        [
-            # Single invalid feature - missing 'id'
-            (
-                {
-                    "type": "Feature",
-                    "geometry": {
-                        "type": "Polygon",
-                        "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
-                    },
-                    "properties": {
-                        "theme": "buildings",
-                        "type": "building",
-                        "version": 0,
-                    },
-                },
-                "id",
-            ),
-            # List with invalid item at index 1 - missing 'id'
-            (
-                [
-                    {
-                        "id": "test1",
-                        "type": "Feature",
-                        "geometry": {
-                            "type": "Polygon",
-                            "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
-                        },
-                        "properties": {
-                            "theme": "buildings",
-                            "type": "building",
-                            "version": 0,
-                        },
-                    },
-                    {
-                        "type": "Feature",
-                        "geometry": {
-                            "type": "Polygon",
-                            "coordinates": [[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]],
-                        },
-                        "properties": {
-                            "theme": "buildings",
-                            "type": "building",
-                            "version": 0,
-                        },
-                    },
-                ],
-                1,  # List index where error occurs
-            ),
-        ],
-    )
-    def test_perform_validation_raises_for_invalid_data(
-        self, data: dict | list, expected_in_loc: str | int
-    ) -> None:
-        """Test that perform_validation raises ValidationError with proper error location."""
+    def test_perform_validation_raises_for_invalid_single_feature(self) -> None:
+        """Test that perform_validation raises ValidationError for single invalid feature."""
+        data = build_feature(id=None)  # Missing required 'id'
         model_type = resolve_types(False, None, ("buildings",), ())
 
         with pytest.raises(ValidationError) as exc_info:
             perform_validation(data, model_type)
 
         errors = exc_info.value.errors()
-        assert any(expected_in_loc in error.get("loc", ()) for error in errors)
+        assert any("id" in error.get("loc", ()) for error in errors)
+
+    def test_perform_validation_raises_for_invalid_list_item(self) -> None:
+        """Test that perform_validation raises ValidationError for invalid list item."""
+        feature1 = build_feature(id="test1")
+        feature2 = build_feature(
+            id=None, coordinates=[[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
+        )
+        data = [feature1, feature2]
+        model_type = resolve_types(False, None, ("buildings",), ())
+
+        with pytest.raises(ValidationError) as exc_info:
+            perform_validation(data, model_type)
+
+        errors = exc_info.value.errors()
+        # Check that error location includes list index 1
+        assert any(1 in error.get("loc", ()) for error in errors)
 
     def test_perform_validation_empty_list(self) -> None:
         """Test validating an empty list (edge case)."""
@@ -232,15 +191,7 @@ class TestPerformValidation:
 
     def test_perform_validation_with_different_themes(self) -> None:
         """Test validating features from different themes."""
-        data = {
-            "id": "test",
-            "type": "Feature",
-            "geometry": {
-                "type": "Polygon",
-                "coordinates": [[[0, 0], [1, 0], [1, 1], [0, 1], [0, 0]]],
-            },
-            "properties": {"theme": "buildings", "type": "building", "version": 0},
-        }
+        data = build_feature(theme="buildings", type="building")
 
         # Should work with buildings theme
         buildings_type = resolve_types(False, None, ("buildings",), ())
