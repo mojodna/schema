@@ -115,7 +115,27 @@ def get_source_name(filename: Path | None) -> str:
 @click.group()
 @click.version_option(package_name="overture-schema")
 def cli() -> None:
-    """Overture Schema command-line interface."""
+    """Overture Schema command-line interface.
+
+    Provides validation, schema generation, and type discovery for Overture Maps data.
+
+    \b
+    Examples:
+      # Validate a file
+      $ overture-schema validate data.json
+    \b
+      # Validate from stdin
+      $ overture-schema validate < data.json
+    \b
+      # List available types
+      $ overture-schema list-types
+    \b
+      # Generate JSON schema
+      $ overture-schema json-schema --theme buildings
+    \b
+      # Validate specific types
+      $ overture-schema validate --theme buildings data.json
+    """
     pass
 
 
@@ -157,7 +177,10 @@ def load_input(filename: Path | None) -> tuple[dict | list, str]:
 def perform_validation(data: dict | list, model_type: UnionType) -> None:
     """Validate data based on its structure.
 
-    Handles single features, lists of features, and GeoJSON FeatureCollections.
+    Automatically detects and handles three input formats:
+    - Single feature (dict)
+    - List of features (list)
+    - GeoJSON FeatureCollection (dict with type="FeatureCollection")
 
     Args:
         data: Parsed data to validate
@@ -180,7 +203,10 @@ def perform_validation(data: dict | list, model_type: UnionType) -> None:
 def handle_validation_error(
     e: ValidationError, model_type: UnionType, stderr: Console
 ) -> None:
-    """Handle and format validation errors.
+    """Handle and format validation errors with rich contextual information.
+
+    Groups errors by discriminator, selects most likely error groups, and provides
+    helpful diagnostics for heterogeneous collections and ambiguous types.
 
     Args:
         e: ValidationError from pydantic
@@ -361,6 +387,24 @@ def validate(
     """Validate Overture Maps data against schemas.
 
     Read from FILENAME or stdin if FILENAME is '-' or not provided.
+    Supports JSON, YAML, and GeoJSON formats.
+
+    \b
+    Examples:
+      # Validate a file
+      $ overture-schema validate data.json
+    \b
+      # Validate from stdin
+      $ overture-schema validate < data.json
+    \b
+      # Validate only buildings
+      $ overture-schema validate --theme buildings data.json
+    \b
+      # Validate specific type
+      $ overture-schema validate --type building data.json
+    \b
+      # Official Overture types only
+      $ overture-schema validate --overture-types data.json
     """
     try:
         model_type = resolve_types(overture_types, namespace, theme, types)
@@ -405,7 +449,25 @@ def json_schema_command(
     theme: tuple[str, ...],
     types: tuple[str, ...],
 ) -> None:
-    """Generate JSON schema for Overture Maps types."""
+    """Generate JSON schema for Overture Maps types.
+
+    Outputs a JSON Schema document to stdout that can be used for validation
+    or documentation purposes.
+
+    \b
+    Examples:
+      # All types
+      $ overture-schema json-schema > schema.json
+    \b
+      # Buildings theme
+      $ overture-schema json-schema --theme buildings
+    \b
+      # Specific types
+      $ overture-schema json-schema --type building
+    \b
+      # Official Overture types only
+      $ overture-schema json-schema --overture-types
+    """
     try:
         model_type = resolve_types(overture_types, namespace, theme, types)
         schema = json_schema(model_type)
@@ -420,9 +482,11 @@ def dump_namespace(
 ) -> None:
     """Print all themes and types for a namespace.
 
+    Displays themes in alphabetical order with their types and docstrings.
+    Each type includes its model class name and description.
+
     Args:
-        namespace: Namespace name
-        theme_types: Dict mapping theme to list of (ModelKey, model_class) tuples
+        theme_types: Dict mapping theme name to list of (ModelKey, model_class) tuples
     """
     for theme in sorted(theme_types.keys(), key=lambda x: (x is None, x)):
         if theme:
@@ -454,7 +518,16 @@ def dump_namespace(
 
 @cli.command("list-types")
 def list_types() -> None:
-    """List all available types grouped by theme with descriptions."""
+    """List all available types grouped by theme with descriptions.
+
+    Displays all registered Overture Maps types organized by theme,
+    including model class names and docstrings.
+
+    \b
+    Examples:
+      # List all types
+      $ overture-schema list-types
+    """
     try:
         models = discover_models()
 
