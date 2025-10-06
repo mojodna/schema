@@ -62,15 +62,17 @@ def resolve_types(
     Returns:
         Model type suitable for passing to parse_feature
     """
-    # Discover all available models via entry points
-    all_models = discover_models(namespace=namespace)
+    # Determine effective namespace
+    effective_namespace = "overture" if use_overture_types else namespace
+
+    # Discover models once with the appropriate namespace
+    all_models = discover_models(namespace=effective_namespace)
 
     # Filter models based on CLI options
     filtered_models: ModelDict = {}
 
     if use_overture_types:
-        # Use only official Overture types (namespace="overture")
-        filtered_models = discover_models(namespace="overture")
+        filtered_models = all_models
 
     elif theme_names and not type_names:
         # Theme-only mode: all types in specified themes
