@@ -7,6 +7,7 @@ from overture.schema.cli.type_analysis import (
     StructuralTuple,
     create_structural_tuple,
     extract_discriminator_path,
+    get_or_create_structural_tuple,
     introspect_union,
 )
 from pydantic import BaseModel, Field
@@ -280,3 +281,79 @@ class TestIntrospectUnion:
             assert literal_value in metadata.discriminator_to_model
         else:
             assert literal_value not in metadata.discriminator_to_model
+
+
+class TestStructuralTupleCaching:
+    """Tests for structural tuple caching functionality."""
+
+    def test_cache_reduces_redundant_computation(self) -> None:
+        """Test that cache prevents redundant structural tuple computation."""
+
+        class Building(BaseModel):
+            type: Literal["building"]
+            height: float
+
+        UnionType = Annotated[Building, Field(discriminator="type")]
+        metadata = introspect_union(UnionType)
+
+        # Simulate systematic errors - same pattern with different indices
+        locs = [
+            (0, "tagged-union[type]", "building", "height"),
+            (1, "tagged-union[type]", "building", "height"),
+            (2, "tagged-union[type]", "building", "height"),
+            (3, "tagged-union[type]", "building", "height"),
+        ]
+
+        cache: dict = {}
+
+        # Process all locations with caching
+        for loc in locs:
+            structural = get_or_create_structural_tuple(loc, metadata, cache)
+            assert structural == ("list_index", "union", "discriminator", "field")
+
+        # Cache should contain all 4 unique locations
+        assert len(cache) == 4
+        assert all(loc in cache for loc in locs)
+
+    def test_cache_handles_identical_patterns(self) -> None:
+        """Test that identical error patterns are cached efficiently."""
+
+        class Place(BaseModel):
+            type: Literal["place"]
+            name: str
+
+        UnionType = Annotated[Place, Field(discriminator="type")]
+        metadata = introspect_union(UnionType)
+
+        # Same location tuple used multiple times
+        loc = ("tagged-union[type]", "place", "name")
+
+        cache: dict = {}
+
+        # First call - cache miss
+        structural1 = get_or_create_structural_tuple(loc, metadata, cache)
+        assert len(cache) == 1
+
+        # Second call - cache hit
+        structural2 = get_or_create_structural_tuple(loc, metadata, cache)
+        assert len(cache) == 1  # Still only one entry
+
+        # Results should be identical
+        assert structural1 == structural2
+        assert structural1 == ("union", "discriminator", "field")
+
+    def test_cache_optional(self) -> None:
+        """Test that caching is optional and None cache works."""
+
+        class Connector(BaseModel):
+            type: Literal["connector"]
+            connectors: list[str]
+
+        UnionType = Annotated[Connector, Field(discriminator="type")]
+        metadata = introspect_union(UnionType)
+
+        loc = ("tagged-union[type]", "connector", "connectors", 0)
+
+        # Should work without cache
+        structural = get_or_create_structural_tuple(loc, metadata, None)
+        assert structural == ("union", "discriminator", "field", "list_index")

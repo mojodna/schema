@@ -181,6 +181,35 @@ def introspect_union(union_type: Any) -> UnionMetadata:  # noqa: ANN401
     )
 
 
+def get_or_create_structural_tuple(
+    loc: ErrorLocation,
+    metadata: UnionMetadata,
+    cache: dict[ErrorLocation, StructuralTuple] | None = None,
+) -> StructuralTuple:
+    """Get structural tuple with optional caching for systematic errors.
+
+    When validating collections with systematic errors (e.g., same field missing
+    across many rows), this cache dramatically reduces redundant classification work.
+
+    Args:
+        loc: The location tuple from a Pydantic validation error
+        metadata: Pre-computed UnionMetadata from introspect_union()
+        cache: Optional dict to cache results (same cache used across all errors)
+
+    Returns:
+        Tuple of same length as loc with structural labels for each element
+    """
+    if cache is not None and loc in cache:
+        return cache[loc]
+
+    structural = create_structural_tuple(loc, metadata)
+
+    if cache is not None:
+        cache[loc] = structural
+
+    return structural
+
+
 def create_structural_tuple(
     loc: ErrorLocation,
     metadata: UnionMetadata,
@@ -263,6 +292,7 @@ def get_item_index(loc: ErrorLocation) -> int | None:
 def infer_model_from_error(
     error: ValidationErrorDict,
     metadata: UnionMetadata,
+    structural_cache: dict[ErrorLocation, StructuralTuple] | None = None,
 ) -> type[BaseModel] | None:
     """Infer the model type that an error is associated with.
 
@@ -272,13 +302,14 @@ def infer_model_from_error(
     Args:
         error: Pydantic validation error dict
         metadata: Pre-computed UnionMetadata from introspect_union()
+        structural_cache: Optional cache for structural tuple computation
 
     Returns:
         The inferred model type, or None if it cannot be determined
     """
     loc = error["loc"]
     try:
-        structural = create_structural_tuple(loc, metadata)
+        structural = get_or_create_structural_tuple(loc, metadata, structural_cache)
 
         # Look for discriminator value or model name in the location path
         # Use the LAST one found (most specific) rather than the first

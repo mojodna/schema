@@ -23,8 +23,8 @@ from .error_formatting import (
     select_most_likely_errors,
 )
 from .output import rewrap
-from .type_analysis import get_item_index, introspect_union
-from .types import ModelDict, UnionType
+from .type_analysis import StructuralTuple, get_item_index, introspect_union
+from .types import ErrorLocation, ModelDict, UnionType
 
 # Create a console instances for rich output
 stdout = Console(highlight=False)
@@ -221,10 +221,16 @@ def handle_validation_error(
     # Compute metadata once upfront
     metadata = introspect_union(model_type)
 
+    # Create cache for structural tuple computation (optimizes systematic errors)
+    structural_cache: dict[ErrorLocation, StructuralTuple] = {}
+
     # Group errors by discriminator path and select most likely group(s)
-    error_groups = group_errors_by_discriminator(e.errors(), metadata)
+    error_groups = group_errors_by_discriminator(e.errors(), metadata, structural_cache)
     filtered_errors, is_tied, is_heterogeneous, item_types = select_most_likely_errors(
-        error_groups, metadata=metadata, all_errors=e.errors()
+        error_groups,
+        metadata=metadata,
+        all_errors=e.errors(),
+        structural_cache=structural_cache,
     )
 
     # Show heterogeneity warning if collection has mixed types
@@ -331,6 +337,7 @@ def handle_validation_error(
             show_model_hint=(i == 0 and not is_heterogeneous),
             item_type=error_item_type,
             show_item_type=is_heterogeneous,
+            structural_cache=structural_cache,
         )
 
 

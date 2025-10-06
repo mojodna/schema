@@ -4,10 +4,11 @@ from pydantic import BaseModel
 from rich.console import Console
 
 from .type_analysis import (
+    StructuralTuple,
     UnionMetadata,
-    create_structural_tuple,
     extract_discriminator_path,
     get_item_index,
+    get_or_create_structural_tuple,
     infer_model_from_error,
 )
 from .types import ErrorLocation, ValidationErrorDict
@@ -16,6 +17,7 @@ from .types import ErrorLocation, ValidationErrorDict
 def group_errors_by_discriminator(
     errors: list[ValidationErrorDict],
     metadata: UnionMetadata,
+    structural_cache: dict[ErrorLocation, StructuralTuple] | None = None,
 ) -> dict[ErrorLocation, list[ValidationErrorDict]]:
     """Group validation errors by their discriminator path.
 
@@ -27,6 +29,7 @@ def group_errors_by_discriminator(
     Args:
         errors: List of Pydantic validation error dicts
         metadata: Pre-computed UnionMetadata from introspect_union()
+        structural_cache: Optional cache for structural tuple computation
 
     Returns:
         Dictionary mapping discriminator paths to lists of errors
@@ -71,7 +74,7 @@ def group_errors_by_discriminator(
     for error in errors:
         loc = error["loc"]
         try:
-            structural = create_structural_tuple(loc, metadata)
+            structural = get_or_create_structural_tuple(loc, metadata, structural_cache)
             disc_path = extract_discriminator_path(loc, structural)
             if disc_path not in groups:
                 groups[disc_path] = []
@@ -88,12 +91,14 @@ def group_errors_by_discriminator(
 def analyze_collection_heterogeneity(
     errors: list[ValidationErrorDict],
     metadata: UnionMetadata,
+    structural_cache: dict[ErrorLocation, StructuralTuple] | None = None,
 ) -> tuple[dict[int, type[BaseModel] | None], bool]:
     """Analyze a collection to detect type heterogeneity.
 
     Args:
         errors: List of Pydantic validation error dicts
         metadata: Pre-computed UnionMetadata from introspect_union()
+        structural_cache: Optional cache for structural tuple computation
 
     Returns:
         Tuple of (item_types, is_heterogeneous) where:
@@ -118,7 +123,7 @@ def analyze_collection_heterogeneity(
         # Group this item's errors by inferred type
         errors_by_type: dict[type[BaseModel], list[ValidationErrorDict]] = {}
         for error in item_error_list:
-            inferred_type = infer_model_from_error(error, metadata)
+            inferred_type = infer_model_from_error(error, metadata, structural_cache)
             if inferred_type is not None:
                 if inferred_type not in errors_by_type:
                     errors_by_type[inferred_type] = []
@@ -143,6 +148,7 @@ def select_most_likely_errors(
     error_groups: dict[ErrorLocation, list[ValidationErrorDict]],
     metadata: UnionMetadata | None = None,
     all_errors: list[ValidationErrorDict] | None = None,
+    structural_cache: dict[ErrorLocation, StructuralTuple] | None = None,
 ) -> tuple[list[ValidationErrorDict], bool, bool, dict[int, type[BaseModel] | None]]:
     """Select the error group(s) most likely to be the intended model.
 
@@ -159,6 +165,7 @@ def select_most_likely_errors(
         error_groups: Dictionary mapping discriminator paths to error lists
         metadata: Optional UnionMetadata for heterogeneity detection
         all_errors: Optional list of all errors for heterogeneity analysis
+        structural_cache: Optional cache for structural tuple computation
 
     Returns:
         Tuple of (errors_list, is_tied, is_heterogeneous, item_types) where:
@@ -175,7 +182,7 @@ def select_most_likely_errors(
     _item_types: dict[int, type[BaseModel] | None] = {}
     if metadata is not None and all_errors is not None:
         _item_types, is_heterogeneous = analyze_collection_heterogeneity(
-            all_errors, metadata
+            all_errors, metadata, structural_cache
         )
 
     # For heterogeneous collections, return only errors matching each item's inferred type
@@ -186,7 +193,9 @@ def select_most_likely_errors(
             if item_idx is not None and item_idx in _item_types:
                 # Only include this error if it matches the inferred type for this item
                 if metadata is not None:
-                    error_type = infer_model_from_error(error, metadata)
+                    error_type = infer_model_from_error(
+                        error, metadata, structural_cache
+                    )
                     if error_type == _item_types[item_idx]:
                         filtered_errors.append(error)
             else:
@@ -243,6 +252,7 @@ def format_validation_error(
     show_model_hint: bool = False,
     item_type: type[BaseModel] | None = None,
     show_item_type: bool = False,
+    structural_cache: dict[ErrorLocation, StructuralTuple] | None = None,
 ) -> None:
     """Format and print a single validation error.
 
@@ -253,6 +263,7 @@ def format_validation_error(
         show_model_hint: Show which model was selected for validation (first error only)
         item_type: The inferred type for this item (always provided if available)
         show_item_type: Whether to display the item type in the path (True for heterogeneous collections)
+        structural_cache: Optional cache for structural tuple computation
 
     TODO: Add optional Rich Table display for errors (--show-table flag)
         - Show the feature data that failed validation
@@ -273,7 +284,7 @@ def format_validation_error(
     selected_model = None
     if metadata is not None and show_model_hint:
         try:
-            structural = create_structural_tuple(loc, metadata)
+            structural = get_or_create_structural_tuple(loc, metadata, structural_cache)
 
             # Look for discriminator value in the location path
             for element, struct_type in zip(loc, structural, strict=False):
@@ -289,7 +300,7 @@ def format_validation_error(
     # Filter out union markers from the path using structural analysis
     if metadata is not None:
         try:
-            structural = create_structural_tuple(loc, metadata)
+            structural = get_or_create_structural_tuple(loc, metadata, structural_cache)
             # Filter out 'union', 'model', and 'discriminator' markers
             # Keep only 'list_index' and 'field' elements for display
             filtered_loc = [
