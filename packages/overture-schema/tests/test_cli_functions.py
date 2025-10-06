@@ -137,6 +137,36 @@ class TestLoadInput:
         captured = capsys.readouterr()
         assert captured.err == ""
 
+    def test_load_input_binary_file(self, cli_runner: pytest.FixtureRequest) -> None:
+        """Test graceful failure on binary files.
+
+        Note: cli_runner provides isolated filesystem for test file creation.
+        """
+        binary_file = "binary.dat"
+        with open(binary_file, "wb") as f:
+            f.write(b"\x00\x01\x02\xff\xfe")
+
+        with pytest.raises((yaml.YAMLError, UnicodeDecodeError)):
+            load_input(Path(binary_file))
+
+    def test_load_input_unicode_filenames(
+        self, cli_runner: pytest.FixtureRequest
+    ) -> None:
+        """Test files with unicode names.
+
+        Note: cli_runner provides isolated filesystem for test file creation.
+        """
+        unicode_filename = "données_測試_🏢.json"
+        feature = build_feature()
+        with open(unicode_filename, "w", encoding="utf-8") as f:
+            f.write(json.dumps(feature))
+
+        data, source_name = load_input(Path(unicode_filename))
+
+        assert isinstance(data, dict)
+        assert data["id"] == "test"
+        assert source_name == unicode_filename
+
 
 class TestPerformValidation:
     """Tests for perform_validation function.
