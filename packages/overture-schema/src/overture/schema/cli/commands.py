@@ -3,6 +3,7 @@
 import builtins
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 
 import click
@@ -202,6 +203,101 @@ def perform_validation(data: dict | list, model_type: UnionType) -> None:
         validate_feature(data, model_type)
 
 
+def compute_collection_statistics(
+    item_types: dict[int, builtins.type[BaseModel] | None],
+    filtered_errors: list,
+) -> tuple[
+    int,
+    Counter[builtins.type[BaseModel] | None],
+    dict[builtins.type[BaseModel], set[int]],
+]:
+    """Compute validation statistics for heterogeneous collections.
+
+    Args:
+        item_types: Mapping from item index to detected model type
+        filtered_errors: List of filtered validation errors
+
+    Returns:
+        Tuple of (items_without_errors, type_counts, items_with_errors_by_type)
+    """
+    # Compute statistics: group items by type
+    type_counts: Counter[builtins.type[BaseModel] | None] = Counter(item_types.values())
+
+    # Determine total number of items (max index + 1, or count from data)
+    max_index = max(item_types.keys()) if item_types else -1
+    total_items = max_index + 1
+
+    # Count items with errors per type
+    items_with_errors_by_type: dict[builtins.type[BaseModel], set[int]] = {}
+    for err in filtered_errors:
+        idx = get_item_index(err["loc"])
+        if idx is not None and idx in item_types:
+            model_type_cls = item_types[idx]
+            if model_type_cls is not None:
+                if model_type_cls not in items_with_errors_by_type:
+                    items_with_errors_by_type[model_type_cls] = set()
+                items_with_errors_by_type[model_type_cls].add(idx)
+
+    # Count items without any errors
+    items_without_errors = total_items - len(
+        {
+            idx
+            for idx in item_types.keys()
+            if any(get_item_index(err["loc"]) == idx for err in filtered_errors)
+        }
+    )
+
+    return items_without_errors, type_counts, items_with_errors_by_type
+
+
+def print_collection_statistics(
+    items_without_errors: int,
+    type_counts: Counter[builtins.type[BaseModel] | None],
+    items_with_errors_by_type: dict[builtins.type[BaseModel], set[int]],
+    stderr: Console,
+) -> None:
+    """Print validation statistics for heterogeneous collections.
+
+    Args:
+        items_without_errors: Count of items with no validation errors
+        type_counts: Counter of items by model type
+        items_with_errors_by_type: Mapping from model type to set of item indices with errors
+        stderr: Console for stderr output
+    """
+    stderr.print("  [dim]Collection statistics:[/dim]")
+
+    # Show items without errors first
+    # TODO: Once we switch to parse_features (instead of validate_features),
+    # we can include type information for items without errors by parsing
+    # the input and tracking which items validated successfully and their types.
+    # This would allow output like: "Building: 2 confirmed (no errors)"
+    if items_without_errors > 0:
+        stderr.print(
+            f"    • {items_without_errors} item{'s' if items_without_errors != 1 else ''} with no errors",
+            style="dim",
+        )
+
+    # Show per-type statistics
+    for model_type_cls, count in type_counts.most_common():
+        if model_type_cls is not None:
+            items_with_errors = len(
+                items_with_errors_by_type.get(model_type_cls, set())
+            )
+            valid_count = count - items_with_errors
+
+            if valid_count > 0:
+                stderr.print(
+                    f"    • {model_type_cls.__name__}: {valid_count} confirmed, {items_with_errors} with errors",
+                    style="dim",
+                )
+            else:
+                stderr.print(
+                    f"    • {model_type_cls.__name__} (probable): {items_with_errors} item{'s' if items_with_errors != 1 else ''} with errors",
+                    style="dim",
+                )
+    stderr.print()
+
+
 def handle_validation_error(
     e: ValidationError, model_type: UnionType, stderr: Console
 ) -> None:
@@ -245,69 +341,14 @@ def handle_validation_error(
         )
         stderr.print()
 
-        # Only compute statistics if there are errors to report
+        # Compute and display statistics if there are errors to report
         if filtered_errors:
-            from collections import Counter
-
-            # Compute statistics: group items by type
-            type_counts = Counter(item_types.values())
-
-            # Determine total number of items (max index + 1, or count from data)
-            max_index = max(item_types.keys()) if item_types else -1
-            total_items = max_index + 1
-
-            # Count items with errors per type
-            items_with_errors_by_type: dict[builtins.type[BaseModel], set[int]] = {}
-            for err in filtered_errors:
-                idx = get_item_index(err["loc"])
-                if idx is not None and idx in item_types:
-                    model_type_cls = item_types[idx]
-                    if model_type_cls is not None:
-                        if model_type_cls not in items_with_errors_by_type:
-                            items_with_errors_by_type[model_type_cls] = set()
-                        items_with_errors_by_type[model_type_cls].add(idx)
-
-            # Count items without any errors
-            items_without_errors = total_items - len(
-                {
-                    idx
-                    for idx in item_types.keys()
-                    if any(get_item_index(err["loc"]) == idx for err in filtered_errors)
-                }
+            items_without_errors, type_counts, items_with_errors_by_type = (
+                compute_collection_statistics(item_types, filtered_errors)
             )
-
-            stderr.print("  [dim]Collection statistics:[/dim]")
-
-            # Show items without errors first
-            # TODO: Once we switch to parse_features (instead of validate_features),
-            # we can include type information for items without errors by parsing
-            # the input and tracking which items validated successfully and their types.
-            # This would allow output like: "Building: 2 confirmed (no errors)"
-            if items_without_errors > 0:
-                stderr.print(
-                    f"    • {items_without_errors} item{'s' if items_without_errors != 1 else ''} with no errors",
-                    style="dim",
-                )
-
-            # Show per-type statistics
-            for model_type_cls, count in type_counts.most_common():
-                if model_type_cls is not None:
-                    items_with_errors = len(
-                        items_with_errors_by_type.get(model_type_cls, set())
-                    )
-                    valid_count = count - items_with_errors
-
-                    if valid_count > 0:
-                        stderr.print(
-                            f"    • {model_type_cls.__name__}: {valid_count} confirmed, {items_with_errors} with errors",
-                            style="dim",
-                        )
-                    else:
-                        stderr.print(
-                            f"    • {model_type_cls.__name__} (probable): {items_with_errors} item{'s' if items_with_errors != 1 else ''} with errors",
-                            style="dim",
-                        )
-            stderr.print()
+            print_collection_statistics(
+                items_without_errors, type_counts, items_with_errors_by_type, stderr
+            )
 
     # Show tie indicator if multiple groups had same error count
     elif is_tied:
