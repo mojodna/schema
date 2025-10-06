@@ -8,7 +8,7 @@ uv-sync:
 check: test doctest
 	@uv run ruff check -q packages/
 	@$(MAKE) mypy
-	@uv run ruff format --check packages/
+	@uv run ruff format -q --check packages/
 
 test-all: uv-sync
 	@uv run pytest packages/
