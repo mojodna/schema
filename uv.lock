@@ -13,6 +13,7 @@ members = [
     "overture-schema-annex",
     "overture-schema-base-theme",
     "overture-schema-buildings-theme",
+    "overture-schema-cli",
     "overture-schema-core",
     "overture-schema-divisions-theme",
     "overture-schema-places-theme",
@@ -652,17 +653,16 @@ wheels = [
 name = "overture-schema"
 source = { editable = "packages/overture-schema" }
 dependencies = [
-    { name = "click" },
     { name = "overture-schema-addresses-theme" },
     { name = "overture-schema-base-theme" },
     { name = "overture-schema-buildings-theme" },
+    { name = "overture-schema-cli" },
     { name = "overture-schema-core" },
     { name = "overture-schema-divisions-theme" },
     { name = "overture-schema-places-theme" },
     { name = "overture-schema-transportation-theme" },
     { name = "pydantic" },
     { name = "pyyaml" },
-    { name = "rich" },
 ]
 
 [package.dev-dependencies]
@@ -674,17 +674,16 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "click", specifier = ">=8.0" },
     { name = "overture-schema-addresses-theme", editable = "packages/overture-schema-addresses-theme" },
     { name = "overture-schema-base-theme", editable = "packages/overture-schema-base-theme" },
     { name = "overture-schema-buildings-theme", editable = "packages/overture-schema-buildings-theme" },
+    { name = "overture-schema-cli", editable = "packages/overture-schema-cli" },
     { name = "overture-schema-core", editable = "packages/overture-schema-core" },
     { name = "overture-schema-divisions-theme", editable = "packages/overture-schema-divisions-theme" },
     { name = "overture-schema-places-theme", editable = "packages/overture-schema-places-theme" },
     { name = "overture-schema-transportation-theme", editable = "packages/overture-schema-transportation-theme" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },
-    { name = "rich", specifier = ">=13.0" },
 ]
 
 [package.metadata.requires-dev]
@@ -749,6 +748,31 @@ requires-dist = [
     { name = "overture-schema-core", editable = "packages/overture-schema-core" },
     { name = "pydantic", specifier = ">=2.0" },
 ]
+
+[[package]]
+name = "overture-schema-cli"
+source = { editable = "packages/overture-schema-cli" }
+dependencies = [
+    { name = "click" },
+    { name = "overture-schema-core" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "yamlcore" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "click", specifier = ">=8.0" },
+    { name = "overture-schema-core", editable = "packages/overture-schema-core" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "rich", specifier = ">=13.0" },
+    { name = "yamlcore", specifier = ">=0.0.4" },
+]
+
+[package.metadata.requires-dev]
+dev = []
 
 [[package]]
 name = "overture-schema-core"
