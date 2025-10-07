@@ -299,7 +299,10 @@ def print_collection_statistics(
 
 
 def handle_validation_error(
-    e: ValidationError, model_type: UnionType, stderr: Console
+    e: ValidationError,
+    model_type: UnionType,
+    stderr: Console,
+    original_data: dict | list | None = None,
 ) -> None:
     """Handle and format validation errors with rich contextual information.
 
@@ -310,10 +313,8 @@ def handle_validation_error(
         e: ValidationError from pydantic
         model_type: Union type used for validation
         stderr: Console for stderr output
+        original_data: Original input data for error display
     """
-    stderr.print("Validation failed:", style="red")
-    stderr.print()
-
     # Compute metadata once upfront
     metadata = introspect_union(model_type)
 
@@ -362,24 +363,48 @@ def handle_validation_error(
         stderr.print("    • Adding discriminator fields to clarify intent", style="dim")
         stderr.print()
 
-    # Display the most likely errors
-    for i, error in enumerate(filtered_errors):
-        # Always determine the item type if available
-        error_item_type = None
+    # Group errors by item
+    from collections import defaultdict
+
+    errors_by_item: dict[int | None, list] = defaultdict(list)
+    for error in filtered_errors:
         item_idx = get_item_index(error["loc"])
-        if item_idx is not None:
+        errors_by_item[item_idx].append(error)
+
+    # Display errors grouped by item
+    from .error_formatting import format_validation_errors_verbose
+
+    for item_idx, item_errors in errors_by_item.items():
+        # Determine item type
+        error_item_type = None
+        if item_idx is not None and item_idx in item_types:
             error_item_type = item_types.get(item_idx)
 
-        # Show model hint only for the first error (and only for non-heterogeneous)
-        format_validation_error(
-            error,
+        # Try verbose display first
+        displayed = format_validation_errors_verbose(
+            item_errors,
             stderr,
             metadata=metadata,
-            show_model_hint=(i == 0 and not is_heterogeneous),
             item_type=error_item_type,
-            show_item_type=is_heterogeneous,
             structural_cache=structural_cache,
+            original_data=original_data,
+            item_index=item_idx,
         )
+
+        # Fall back to non-verbose format if verbose couldn't display
+        if not displayed:
+            for i, error in enumerate(item_errors):
+                format_validation_error(
+                    error,
+                    stderr,
+                    metadata=metadata,
+                    show_model_hint=(i == 0),
+                    item_type=error_item_type,
+                    show_item_type=is_heterogeneous,
+                    structural_cache=structural_cache,
+                    original_data=original_data,
+                    show_feature_data=False,
+                )
 
 
 def handle_generic_error(e: Exception, filename: Path | None, error_type: str) -> None:
@@ -464,7 +489,7 @@ def validate(
     except yaml.YAMLError as e:
         handle_generic_error(e, filename, "yaml")
     except ValidationError as e:
-        handle_validation_error(e, model_type, stderr)
+        handle_validation_error(e, model_type, stderr, original_data=data)
         sys.exit(1)
     except ValueError as e:
         handle_generic_error(e, filename, "value")

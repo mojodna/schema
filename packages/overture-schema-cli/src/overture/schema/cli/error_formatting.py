@@ -1,8 +1,15 @@
 """Error formatting and grouping for validation errors."""
 
+from typing import Any
+
 from pydantic import BaseModel
 from rich.console import Console
 
+from .data_display import (
+    create_feature_display,
+    extract_feature_data,
+    select_context_fields,
+)
 from .type_analysis import (
     StructuralTuple,
     UnionMetadata,
@@ -245,6 +252,102 @@ def format_path(filtered_loc: list[str | int]) -> str:
     return path_str
 
 
+def format_validation_errors_verbose(
+    errors: list[ValidationErrorDict],
+    console: Console,
+    metadata: UnionMetadata | None = None,
+    item_type: type[BaseModel] | None = None,
+    structural_cache: dict[ErrorLocation, StructuralTuple] | None = None,
+    original_data: dict[str, Any] | list[Any] | None = None,
+    item_index: int | None = None,
+) -> bool:
+    """Format and display multiple validation errors for a single item in verbose mode.
+
+    Args:
+        errors: List of validation errors for this item
+        console: Rich Console instance for output
+        metadata: Pre-computed UnionMetadata from introspect_union() (optional)
+        item_type: The inferred type for this item
+        structural_cache: Optional cache for structural tuple computation
+        original_data: Original input data for extracting feature details
+        item_index: Index of item in collection
+
+    Returns:
+        True if errors were displayed, False otherwise
+    """
+    if not errors or not original_data:
+        return False
+
+    # Extract item index from first error if not provided
+    if item_index is None:
+        item_index = get_item_index(errors[0]["loc"])
+
+    # Extract flattened feature data
+    feature = extract_feature_data(original_data, item_index)
+    if not feature:
+        return False
+
+    # Collect all error paths and messages
+    error_tuples: list[tuple[list[str | int], str]] = []
+    for error in errors:
+        loc = error["loc"]
+        msg = error["msg"]
+
+        # Extract actual error message from context if available
+        ctx = error.get("ctx", {})
+        if "error" in ctx:
+            msg = ctx["error"]
+
+        # Filter loc to remove union markers
+        if metadata is not None:
+            try:
+                structural = get_or_create_structural_tuple(
+                    loc, metadata, structural_cache
+                )
+                filtered_loc = [
+                    element
+                    for element, struct_type in zip(loc, structural, strict=False)
+                    if struct_type in ("list_index", "field")
+                ]
+            except Exception:
+                filtered_loc = list(loc)
+        else:
+            filtered_loc = list(loc)
+
+        # Strip out the list index since we've already extracted that feature
+        error_path = list(filtered_loc)
+        if error_path and isinstance(error_path[0], int):
+            error_path = error_path[1:]
+
+        error_tuples.append((error_path, msg))
+
+    # Select context fields for all errors
+    # Merge context from all error paths
+    context_size = 1
+    selected_fields: dict[str, Any] = {}
+
+    for error_path, _ in error_tuples:
+        context = select_context_fields(feature, error_path, context_size=context_size)
+        selected_fields.update(context)
+
+    if selected_fields:
+        # Create and display panel with all errors
+        # Get type name from item_type if available
+        type_name = item_type.__name__ if item_type else None
+        panel = create_feature_display(
+            selected_fields,
+            error_tuples,
+            item_index=item_index,
+            item_type=type_name,
+        )
+        console.print(panel)
+        console.print()
+        return True
+    else:
+        # No fields to display (e.g., root-level discriminator errors)
+        return False
+
+
 def format_validation_error(
     error: ValidationErrorDict,
     console: Console,
@@ -253,6 +356,8 @@ def format_validation_error(
     item_type: type[BaseModel] | None = None,
     show_item_type: bool = False,
     structural_cache: dict[ErrorLocation, StructuralTuple] | None = None,
+    original_data: dict[str, Any] | list[Any] | None = None,
+    show_feature_data: bool = False,
 ) -> None:
     """Format and print a single validation error.
 
@@ -264,19 +369,8 @@ def format_validation_error(
         item_type: The inferred type for this item (always provided if available)
         show_item_type: Whether to display the item type in the path (True for heterogeneous collections)
         structural_cache: Optional cache for structural tuple computation
-
-    TODO: Add optional Rich Table display for errors (--show-table flag)
-        - Show the feature data that failed validation
-        - Highlight the problematic fields
-        - Makes debugging easier for lists of features
-
-    TODO: Use error path to navigate back into original input data
-        - Parse error path (e.g., [1].properties.name)
-        - Navigate to that location in original input
-        - Detect and drop discriminator elements (like tagged-union[...])
-        - Extract exact problematic value from original input
-        - Reuse this logic for Rich Table highlighting
-        - Improves error messages with precise context
+        original_data: Original input data for extracting feature details (optional)
+        show_feature_data: Whether to display feature data with error (verbose mode)
     """
     loc = error["loc"]
 
@@ -336,17 +430,48 @@ def format_validation_error(
         msg = ctx["error"]
         input_value = None
 
-    console.print(f"  {path_str}", style="cyan")
-    console.print(f"    → {msg}", style="yellow")
+    # Skip error summary lines in verbose mode
+    if not show_feature_data:
+        console.print(f"  {path_str}", style="cyan")
+        console.print(f"    → {msg}", style="yellow")
 
-    # Show input value if present and not too large
-    if input_value is not None:
-        value_str = (
-            repr(input_value)
-            if not isinstance(input_value, str)
-            else f"'{input_value}'"
-        )
-        prefix = "    → Got: "
-        if len(value_str) <= console.width - len(prefix):
-            console.print(f"{prefix}{value_str}", style="dim")
-    console.print()
+        # Show input value if present and not too large
+        if input_value is not None:
+            value_str = (
+                repr(input_value)
+                if not isinstance(input_value, str)
+                else f"'{input_value}'"
+            )
+            prefix = "    → Got: "
+            if len(value_str) <= console.width - len(prefix):
+                console.print(f"{prefix}{value_str}", style="dim")
+        console.print()
+
+    # Show feature data in verbose mode
+    if show_feature_data and original_data is not None:
+        # Extract item index from error location
+        item_index = get_item_index(loc)
+
+        # Extract flattened feature data
+        feature = extract_feature_data(original_data, item_index)
+
+        if feature:
+            # Convert filtered_loc to error path format (list of str/int)
+            # Strip out the list index since we've already extracted that feature
+            error_path = list(filtered_loc)
+            if error_path and isinstance(error_path[0], int):
+                error_path = error_path[1:]  # Remove list index
+
+            # Select context fields
+            selected_fields = select_context_fields(feature, error_path, context_size=1)
+
+            if selected_fields:
+                # Create and display panel (with item index for title)
+                panel = create_feature_display(
+                    selected_fields,
+                    [(error_path, msg)],
+                    item_index=item_index,
+                )
+                # Print panel directly (it has its own borders, no extra indentation needed)
+                console.print(panel)
+                console.print()

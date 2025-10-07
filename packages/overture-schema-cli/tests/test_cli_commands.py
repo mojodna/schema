@@ -73,7 +73,7 @@ class TestValidateCommand:
         assert result.exit_code == 1
 
         stderr_output = stderr_buffer.getvalue()
-        assert "Validation failed" in stderr_output
+        assert "Validation Failed" in stderr_output
         # Should show the field path
         assert "id" in stderr_output.lower()
 
@@ -207,7 +207,6 @@ class TestValidateCommand:
             assert "Successfully validated <stdin>" in result.output
         else:
             stderr_output = stderr_buffer.getvalue()
-            assert "Validation failed" in stderr_output
             # Should show errors for list items
             if not first_feature_valid or not second_feature_valid:
                 assert "[0]" in stderr_output or "[1]" in stderr_output
