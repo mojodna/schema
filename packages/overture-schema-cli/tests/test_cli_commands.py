@@ -57,7 +57,7 @@ class TestValidateCommand:
         flat_feature = build_feature(geojson_format=False)
         flat_json = json.dumps(flat_feature)
         result = cli_runner.invoke(
-            cli, ["validate", "--theme", "buildings"], input=flat_json
+            cli, ["validate", "--theme", "buildings", "-"], input=flat_json
         )
         assert result.exit_code == 0
         assert "Successfully validated <stdin>" in result.output
@@ -69,7 +69,9 @@ class TestValidateCommand:
         stderr_buffer: StringIO,
     ) -> None:
         """Test that validation errors are formatted correctly."""
-        result = cli_runner.invoke(cli, ["validate"], input=missing_id_yaml_content)
+        result = cli_runner.invoke(
+            cli, ["validate", "-"], input=missing_id_yaml_content
+        )
         assert result.exit_code == 1
 
         stderr_output = stderr_buffer.getvalue()
@@ -84,7 +86,9 @@ class TestValidateCommand:
         stderr_buffer: StringIO,
     ) -> None:
         """Test that validation error paths don't show internal tagged-union markers."""
-        result = cli_runner.invoke(cli, ["validate"], input=missing_id_yaml_content)
+        result = cli_runner.invoke(
+            cli, ["validate", "-"], input=missing_id_yaml_content
+        )
         assert result.exit_code == 1
 
         stderr_output = stderr_buffer.getvalue()
@@ -102,7 +106,7 @@ class TestValidateCommand:
         """Test validation error for invalid type value."""
         invalid_feature = build_feature(type="invalid_type")
         invalid_type_json = json.dumps(invalid_feature)
-        result = cli_runner.invoke(cli, ["validate"], input=invalid_type_json)
+        result = cli_runner.invoke(cli, ["validate", "-"], input=invalid_type_json)
         assert result.exit_code == 1
 
     def test_validate_error_with_nested_field(self, cli_runner: CliRunner) -> None:
@@ -115,30 +119,28 @@ class TestValidateCommand:
             }
         )
         nested_field_json = json.dumps(feature)
-        result = cli_runner.invoke(cli, ["validate"], input=nested_field_json)
+        result = cli_runner.invoke(cli, ["validate", "-"], input=nested_field_json)
         assert result.exit_code == 1
 
-    @pytest.mark.parametrize(
-        "filename_arg",
-        [
-            pytest.param(None, id="no_argument"),
-            pytest.param("-", id="dash_argument"),
-        ],
-    )
-    def test_validate_stdin_with_different_args(
+    def test_validate_stdin_requires_dash_argument(
         self,
         cli_runner: CliRunner,
         building_feature_yaml_content: str,
-        filename_arg: str | None,
     ) -> None:
-        """Test validating from stdin with different argument forms."""
-        args = ["validate"]
-        if filename_arg is not None:
-            args.append(filename_arg)
-
-        result = cli_runner.invoke(cli, args, input=building_feature_yaml_content)
+        """Test validating from stdin requires explicit '-' argument."""
+        # With dash argument - should work
+        result = cli_runner.invoke(
+            cli, ["validate", "-"], input=building_feature_yaml_content
+        )
         assert result.exit_code == 0
         assert "Successfully validated <stdin>" in result.output
+
+        # Without dash argument - should show help/usage
+        result = cli_runner.invoke(
+            cli, ["validate"], input=building_feature_yaml_content
+        )
+        assert result.exit_code == 2  # Usage error
+        assert "Missing argument" in result.output or "Usage:" in result.output
 
     @pytest.mark.parametrize(
         "has_error,expected_exit_code,check_index",
@@ -162,7 +164,7 @@ class TestValidateCommand:
             id=feature2_id, coordinates=[[[2, 2], [3, 2], [3, 3], [2, 3], [2, 2]]]
         )
         feature_list_json = json.dumps([feature1, feature2])
-        result = cli_runner.invoke(cli, ["validate"], input=feature_list_json)
+        result = cli_runner.invoke(cli, ["validate", "-"], input=feature_list_json)
         assert result.exit_code == expected_exit_code
 
         if check_index:
@@ -199,7 +201,7 @@ class TestValidateCommand:
             "features": [feature1, feature2],
         }
         result = cli_runner.invoke(
-            cli, ["validate"], input=json.dumps(feature_collection)
+            cli, ["validate", "-"], input=json.dumps(feature_collection)
         )
         assert result.exit_code == expected_exit_code
 
@@ -220,7 +222,7 @@ class TestValidateCommand:
         # Try to validate with a nonexistent theme
         result = cli_runner.invoke(
             cli,
-            ["validate", "--theme", "nonexistent_theme"],
+            ["validate", "--theme", "nonexistent_theme", "-"],
             input=building_feature_yaml_content,
         )
         # UsageError exits with code 2
@@ -236,7 +238,7 @@ class TestValidateCommand:
         # Try to validate with a nonexistent type
         result = cli_runner.invoke(
             cli,
-            ["validate", "--type", "nonexistent_type"],
+            ["validate", "--type", "nonexistent_type", "-"],
             input=building_feature_yaml_content,
         )
         # UsageError exits with code 2
@@ -252,7 +254,7 @@ class TestValidateCommand:
         # Try to validate buildings theme with a type that doesn't exist in that theme
         result = cli_runner.invoke(
             cli,
-            ["validate", "--theme", "buildings", "--type", "segment"],
+            ["validate", "--theme", "buildings", "--type", "segment", "-"],
             input=building_feature_yaml_content,
         )
         # UsageError exits with code 2

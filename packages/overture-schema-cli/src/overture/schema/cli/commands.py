@@ -103,16 +103,16 @@ def resolve_types(
     return create_union_type_from_models(filtered_models)
 
 
-def get_source_name(filename: Path | None) -> str:
+def get_source_name(filename: Path) -> str:
     """Get display name for input source.
 
     Args:
-        filename: Path to input file, None for stdin, or "-" for explicit stdin
+        filename: Path to input file or "-" for stdin
 
     Returns:
         Display name: "<stdin>" for stdin input, otherwise the filename
     """
-    return "<stdin>" if (filename is None or str(filename) == "-") else str(filename)
+    return "<stdin>" if str(filename) == "-" else str(filename)
 
 
 @click.group()
@@ -128,7 +128,7 @@ def cli() -> None:
       $ overture-schema validate data.json
     \b
       # Validate from stdin
-      $ overture-schema validate < data.json
+      $ overture-schema validate - < data.json
     \b
       # List available types
       $ overture-schema list-types
@@ -142,11 +142,11 @@ def cli() -> None:
     pass
 
 
-def load_input(filename: Path | None) -> tuple[dict | list, str]:
+def load_input(filename: Path) -> tuple[dict | list, str]:
     """Load and parse input from file or stdin.
 
     Args:
-        filename: Path to input file, None for stdin, or "-" for explicit stdin
+        filename: Path to input file, or "-" for stdin
 
     Returns:
         Tuple of (parsed_data, source_name)
@@ -155,7 +155,7 @@ def load_input(filename: Path | None) -> tuple[dict | list, str]:
         yaml.YAMLError: If input is invalid YAML/JSON
         SystemExit: If filename doesn't exist or isn't a file
     """
-    if filename is None or str(filename) == "-":
+    if str(filename) == "-":
         data = yaml.load(sys.stdin, Loader=CoreLoader)
         return data, "<stdin>"
 
@@ -407,12 +407,12 @@ def handle_validation_error(
                 )
 
 
-def handle_generic_error(e: Exception, filename: Path | None, error_type: str) -> None:
+def handle_generic_error(e: Exception, filename: Path, error_type: str) -> None:
     """Handle generic errors during validation.
 
     Args:
         e: Exception that occurred
-        filename: Input filename or None for stdin
+        filename: Input filename or "-" for stdin
         error_type: Type of error for user-friendly message
 
     Raises:
@@ -431,7 +431,7 @@ def handle_generic_error(e: Exception, filename: Path | None, error_type: str) -
 
 
 @cli.command()
-@click.argument("filename", type=click.Path(path_type=Path), required=False)
+@click.argument("filename", type=click.Path(path_type=Path), required=True)
 @click.option(
     "--overture-types",
     is_flag=True,
@@ -453,7 +453,7 @@ def handle_generic_error(e: Exception, filename: Path | None, error_type: str) -
     help="Specific type to validate against (e.g., building, segment)",
 )
 def validate(
-    filename: Path | None,
+    filename: Path,
     overture_types: bool,
     namespace: str | None,
     theme: tuple[str, ...],
@@ -461,7 +461,7 @@ def validate(
 ) -> None:
     """Validate Overture Maps data against schemas.
 
-    Read from FILENAME or stdin if FILENAME is '-' or not provided.
+    Read from FILENAME or stdin if FILENAME is '-'.
     Supports JSON, YAML, and GeoJSON formats.
 
     \b
@@ -470,7 +470,7 @@ def validate(
       $ overture-schema validate data.json
     \b
       # Validate from stdin
-      $ overture-schema validate < data.json
+      $ overture-schema validate - < data.json
     \b
       # Validate only buildings
       $ overture-schema validate --theme buildings data.json
