@@ -2,7 +2,6 @@
 
 from typing import Any
 
-from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
@@ -118,6 +117,7 @@ def select_context_fields(
     feature: dict[str, Any],
     error_path: list[str | int],
     context_size: int = DEFAULT_CONTEXT_SIZE,
+    pinned_fields: list[str] | None = None,
 ) -> dict[str, Any]:
     """Select relevant fields for display around an error location.
 
@@ -129,6 +129,7 @@ def select_context_fields(
         feature: Flattened feature dict
         error_path: Path to error field (may include array indices)
         context_size: Number of neighboring fields to include on each side
+        pinned_fields: List of field names to always include (even outside context window)
 
     Returns:
         Dict of selected fields with their values
@@ -342,6 +343,35 @@ def select_context_fields(
             "..."  # Use "... " (with space) to distinguish from start marker
         )
 
+    # Add pinned fields that aren't already in selected
+    # We need to maintain field order, so rebuild the dict
+    if pinned_fields:
+        # Build ordered dict with all fields (selected + pinned) in natural order
+        ordered_selected: dict[str, Any] = {}
+
+        # Add start elision marker
+        if "..." in selected:
+            ordered_selected["..."] = selected["..."]
+
+        # Add all fields in feature order (including pinned fields)
+        for field_name in field_names:
+            # Include if already selected OR if it's a pinned field
+            if field_name in selected:
+                ordered_selected[field_name] = selected[field_name]
+            elif field_name in pinned_fields:
+                ordered_selected[field_name] = feature.get(field_name)
+
+        # Add pinned fields that don't exist in the feature (at end with None)
+        for pinned_field in pinned_fields:
+            if pinned_field not in field_names and pinned_field not in ordered_selected:
+                ordered_selected[pinned_field] = None
+
+        # Add end elision marker
+        if "... " in selected:
+            ordered_selected["... "] = selected["... "]
+
+        return ordered_selected
+
     return selected
 
 
@@ -422,6 +452,8 @@ def create_feature_display(
     errors: list[tuple[list[str | int], str]],
     item_index: int | None = None,
     item_type: str | None = None,
+    show_fields: list[str] | None = None,
+    feature: dict[str, Any] | None = None,
 ) -> Panel:
     """Create a Rich Panel with table displaying feature fields with error annotations.
 
@@ -434,6 +466,8 @@ def create_feature_display(
         errors: List of (error_path, error_msg) tuples for all errors in this feature
         item_index: Optional index of item in collection (for panel title)
         item_type: Optional type name to display in panel title (e.g., "Building")
+        show_fields: List of field names to display in header
+        feature: Full feature dict for extracting show_fields values
 
     Returns:
         Rich Panel containing the table, ready to print
@@ -492,7 +526,7 @@ def create_feature_display(
         # Check if this field has errors
         if field_name in error_map:
             # Add error annotation with arrow in separate column
-            field_name_styled = f"[bright_yellow]{field_name}[/bright_yellow]"
+            field_name_styled = f"[bold bright_yellow]{field_name}[/bold bright_yellow]"
             value_styled = f"[bright_red]{formatted_value}[/bright_red]"
             # Join multiple error messages with newlines (without arrows)
             error_messages = error_map[field_name]
@@ -517,6 +551,32 @@ def create_feature_display(
             title = f"[{item_index}]"
     else:
         title = "[bright_red]Validation Failed[/bright_red]"
+
+    # Add show_fields to title if provided
+    if show_fields and feature:
+        field_parts = []
+        max_field_length = 30  # Truncate long values in header
+        for field_name in show_fields:
+            field_value = feature.get(field_name)
+            if field_value is None:
+                formatted = "<missing>"
+            elif isinstance(field_value, str):
+                # Truncate long strings
+                if len(field_value) > max_field_length:
+                    formatted = field_value[:max_field_length] + "..."
+                else:
+                    formatted = field_value
+            else:
+                # For non-strings, convert to string and truncate
+                str_value = str(field_value)
+                if len(str_value) > max_field_length:
+                    formatted = str_value[:max_field_length] + "..."
+                else:
+                    formatted = str_value
+            field_parts.append(f"{field_name}={formatted}")
+
+        if field_parts:
+            title = f"{title} {' '.join(field_parts)}"
 
     return Panel(
         table,

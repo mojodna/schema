@@ -322,6 +322,7 @@ def handle_validation_error(
     model_type: UnionType,
     stderr: Console,
     original_data: dict | list | None = None,
+    show_fields: list[str] | None = None,
 ) -> None:
     """Handle and format validation errors with rich contextual information.
 
@@ -333,6 +334,7 @@ def handle_validation_error(
         model_type: Union type used for validation
         stderr: Console for stderr output
         original_data: Original input data for error display
+        show_fields: List of field names to display alongside errors
     """
     # Compute metadata once upfront
     metadata = introspect_union(model_type)
@@ -408,6 +410,7 @@ def handle_validation_error(
             structural_cache=structural_cache,
             original_data=original_data,
             item_index=item_idx,
+            show_fields=show_fields,
         )
 
         # Fall back to non-verbose format if verbose couldn't display
@@ -471,12 +474,19 @@ def handle_generic_error(e: Exception, filename: Path, error_type: str) -> None:
     multiple=True,
     help="Specific type to validate against (e.g., building, segment)",
 )
+@click.option(
+    "--show-field",
+    "show_fields",
+    multiple=True,
+    help="Field to display alongside errors (e.g., id, version). Can be repeated.",
+)
 def validate(
     filename: Path,
     overture_types: bool,
     namespace: str | None,
     theme: tuple[str, ...],
     types: tuple[str, ...],
+    show_fields: tuple[str, ...],
 ) -> None:
     """Validate Overture Maps data against schemas.
 
@@ -508,7 +518,9 @@ def validate(
     except yaml.YAMLError as e:
         handle_generic_error(e, filename, "yaml")
     except ValidationError as e:
-        handle_validation_error(e, model_type, stderr, original_data=data)
+        handle_validation_error(
+            e, model_type, stderr, original_data=data, show_fields=list(show_fields)
+        )
         sys.exit(1)
     except ValueError as e:
         handle_generic_error(e, filename, "value")

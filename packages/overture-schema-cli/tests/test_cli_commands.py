@@ -260,3 +260,109 @@ class TestValidateCommand:
         # UsageError exits with code 2
         assert result.exit_code == 2
         assert "No models found matching the specified criteria" in result.output
+
+
+class TestShowFieldOption:
+    """Tests for the --show-field option in validate command."""
+
+    def test_show_field_displays_in_header_on_error(
+        self, cli_runner: CliRunner, stderr_buffer: StringIO
+    ) -> None:
+        """Test that --show-field displays field value in error header."""
+        # Create invalid feature with missing required field, but with id
+        feature = build_feature(id="abc123", version=None)
+        result = cli_runner.invoke(
+            cli, ["validate", "--show-field", "id", "-"], input=json.dumps(feature)
+        )
+        assert result.exit_code == 1
+
+        stderr_output = stderr_buffer.getvalue()
+        # Header should include id value
+        assert "id=abc123" in stderr_output
+
+    def test_show_field_displays_in_context(
+        self, cli_runner: CliRunner, stderr_buffer: StringIO
+    ) -> None:
+        """Test that --show-field pins field in context display."""
+        # Create invalid feature with error far from id field
+        feature = build_feature(id="test123", version=None)
+        result = cli_runner.invoke(
+            cli, ["validate", "--show-field", "id", "-"], input=json.dumps(feature)
+        )
+        assert result.exit_code == 1
+
+        stderr_output = stderr_buffer.getvalue()
+        # Should show id field in context even if error is elsewhere
+        assert "id" in stderr_output
+        assert "test123" in stderr_output
+
+    def test_show_multiple_fields(
+        self, cli_runner: CliRunner, stderr_buffer: StringIO
+    ) -> None:
+        """Test that multiple --show-field options work together."""
+        feature = build_feature(id="xyz789", version=1, theme=None)
+        result = cli_runner.invoke(
+            cli,
+            ["validate", "--show-field", "id", "--show-field", "version", "-"],
+            input=json.dumps(feature),
+        )
+        assert result.exit_code == 1
+
+        stderr_output = stderr_buffer.getvalue()
+        # Header should include both field values
+        assert "id=xyz789" in stderr_output
+        assert "version=1" in stderr_output
+
+    def test_show_field_with_missing_field(
+        self, cli_runner: CliRunner, stderr_buffer: StringIO
+    ) -> None:
+        """Test that --show-field shows <missing> for non-existent fields."""
+        feature = build_feature(version=None)
+        # Don't include 'custom_field' in the feature
+        result = cli_runner.invoke(
+            cli,
+            ["validate", "--show-field", "custom_field", "-"],
+            input=json.dumps(feature),
+        )
+        assert result.exit_code == 1
+
+        stderr_output = stderr_buffer.getvalue()
+        # Should show <missing> for the non-existent field
+        assert "custom_field" in stderr_output
+        assert "<missing>" in stderr_output
+
+    def test_show_field_truncates_long_values(
+        self, cli_runner: CliRunner, stderr_buffer: StringIO
+    ) -> None:
+        """Test that long field values are truncated in header."""
+        long_id = "x" * 100  # Very long ID
+        feature = build_feature(id=long_id, version=None)
+        result = cli_runner.invoke(
+            cli, ["validate", "--show-field", "id", "-"], input=json.dumps(feature)
+        )
+        assert result.exit_code == 1
+
+        stderr_output = stderr_buffer.getvalue()
+        # Should show truncated value in header (with ellipsis)
+        assert "id=" in stderr_output
+        assert "..." in stderr_output
+        # Should not show the full 100 character string
+        assert long_id not in stderr_output
+
+    def test_show_field_in_collection(
+        self, cli_runner: CliRunner, stderr_buffer: StringIO
+    ) -> None:
+        """Test that --show-field works with feature collections."""
+        feature1 = build_feature(id="first", version=None)
+        feature2 = build_feature(id="second", theme=None)
+        result = cli_runner.invoke(
+            cli,
+            ["validate", "--show-field", "id", "-"],
+            input=json.dumps([feature1, feature2]),
+        )
+        assert result.exit_code == 1
+
+        stderr_output = stderr_buffer.getvalue()
+        # Should show id for both features
+        assert "id=first" in stderr_output or "first" in stderr_output
+        assert "id=second" in stderr_output or "second" in stderr_output

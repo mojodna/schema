@@ -260,6 +260,7 @@ def format_validation_errors_verbose(
     structural_cache: dict[ErrorLocation, StructuralTuple] | None = None,
     original_data: dict[str, Any] | list[Any] | None = None,
     item_index: int | None = None,
+    show_fields: list[str] | None = None,
 ) -> bool:
     """Format and display multiple validation errors for a single item in verbose mode.
 
@@ -271,6 +272,7 @@ def format_validation_errors_verbose(
         structural_cache: Optional cache for structural tuple computation
         original_data: Original input data for extracting feature details
         item_index: Index of item in collection
+        show_fields: List of field names to display alongside errors
 
     Returns:
         True if errors were displayed, False otherwise
@@ -327,7 +329,9 @@ def format_validation_errors_verbose(
     selected_fields: dict[str, Any] = {}
 
     for error_path, _ in error_tuples:
-        context = select_context_fields(feature, error_path, context_size=context_size)
+        context = select_context_fields(
+            feature, error_path, context_size=context_size, pinned_fields=show_fields
+        )
         selected_fields.update(context)
 
     if selected_fields:
@@ -339,6 +343,8 @@ def format_validation_errors_verbose(
             error_tuples,
             item_index=item_index,
             item_type=type_name,
+            show_fields=show_fields,
+            feature=feature,
         )
         console.print(panel)
         console.print()
