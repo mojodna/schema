@@ -167,6 +167,31 @@ class TestLoadInput:
         assert data["id"] == "test"
         assert source_name == unicode_filename
 
+    def test_load_input_jsonl_from_stdin(
+        self, cli_runner: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test that load_input handles newline-delimited JSON (JSONL) from stdin.
+
+        JSONL format is commonly used for streaming GeoJSON features where each line
+        is a complete JSON object/feature.
+        """
+        import io
+
+        feature1 = build_feature(id="test1")
+        feature2 = build_feature(id="test2")
+        jsonl_input = f"{json.dumps(feature1)}\n{json.dumps(feature2)}\n"
+
+        # Mock stdin with JSONL content
+        monkeypatch.setattr("sys.stdin", io.StringIO(jsonl_input))
+
+        data, source_name = load_input(Path("-"))
+
+        assert source_name == "<stdin>"
+        assert isinstance(data, list)
+        assert len(data) == 2
+        assert data[0]["id"] == "test1"
+        assert data[1]["id"] == "test2"
+
 
 class TestPerformValidation:
     """Tests for perform_validation function.

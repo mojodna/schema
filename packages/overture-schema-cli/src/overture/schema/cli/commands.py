@@ -156,7 +156,26 @@ def load_input(filename: Path) -> tuple[dict | list, str]:
         SystemExit: If filename doesn't exist or isn't a file
     """
     if str(filename) == "-":
-        data = yaml.load(sys.stdin, Loader=CoreLoader)
+        # Read all stdin content
+        content = sys.stdin.read()
+
+        # Try to detect JSONL format (newline-delimited JSON)
+        # JSONL has multiple non-empty lines, each containing a complete JSON object
+        lines = [line.strip() for line in content.strip().split("\n") if line.strip()]
+
+        if len(lines) > 1:
+            # Attempt to parse as JSONL
+            try:
+                parsed_lines = [json.loads(line) for line in lines]
+                return parsed_lines, "<stdin>"
+            except json.JSONDecodeError:
+                # Not valid JSONL, fall through to YAML parser
+                pass
+
+        # Parse as single YAML/JSON document
+        import io
+
+        data = yaml.load(io.StringIO(content), Loader=CoreLoader)
         return data, "<stdin>"
 
     if not filename.is_file():
