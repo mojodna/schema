@@ -1,0 +1,14 @@
+$schema: https://vecorel.org/sdl/v0.2.0/schema.json
+required:
+  - admin:country_code
+properties:
+  admin:country_code:
+    type: string
+    minLength: 2
+    maxLength: 2
+    pattern: ^[A-Z]{2}$
+  admin:subdivision_code:
+    type: string
+    minLength: 1
+    maxLength: 3
+    pattern: ^[A-Z0-9]{1,3}$
