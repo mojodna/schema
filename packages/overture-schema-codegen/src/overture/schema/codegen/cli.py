@@ -23,12 +23,13 @@ from .layout.module_layout import (
 from .markdown.pipeline import generate_markdown_pages
 from .pyspark.pipeline import generate_pyspark_modules
 from .spec_discovery import extract_alias_spec, extract_model_spec
+from .vecorel.pipeline import generate_vecorel_documents
 
 log = logging.getLogger(__name__)
 
 __all__ = ["cli"]
 
-_OUTPUT_FORMATS = ("markdown", "pyspark", "json-schema")
+_OUTPUT_FORMATS = ("markdown", "pyspark", "json-schema", "vecorel")
 
 _FEATURE_FRONTMATTER = "---\nsidebar_position: 1\n---\n\n"
 
@@ -120,6 +121,8 @@ def generate(
         _generate_pyspark(model_specs, output_dir, test_output_dir)
     elif output_format == "json-schema":
         _generate_json_schema(model_specs, output_dir)
+    elif output_format == "vecorel":
+        _generate_vecorel(model_specs, output_dir)
     else:
         # RootModel entry points yield no ModelSpec, so they document as
         # named aliases -- reachable no other way, since a RootModel field
@@ -182,6 +185,22 @@ def _generate_json_schema(
     """Generate JSON Schema documents, one per model spec."""
     documents = generate_json_schema_documents(model_specs)
     for doc in documents:
+        _write_output(doc.content, output_dir, doc.path)
+
+
+def _generate_vecorel(
+    model_specs: list[ModelSpec],
+    output_dir: Path | None,
+) -> None:
+    """Generate Vecorel SDL documents, one per model spec.
+
+    A model whose root is a discriminated union yields no document -- SDL has
+    no union vocabulary -- so the absence is logged rather than written.
+    """
+    for doc in generate_vecorel_documents(model_specs):
+        if doc.content is None:
+            log.warning("%s: no Vecorel document (%d gaps)", doc.model, len(doc.gaps))
+            continue
         _write_output(doc.content, output_dir, doc.path)
 
 
