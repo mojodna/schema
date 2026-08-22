@@ -14,6 +14,7 @@ from overture.schema.system.discovery import (
 )
 
 from .extraction.specs import ModelSpec, SupplementarySpec, TypeIdentity
+from .json_schema.pipeline import generate_json_schema_documents
 from .layout.module_layout import (
     OUTPUT_ROOT,
     compute_schema_root,
@@ -27,7 +28,7 @@ log = logging.getLogger(__name__)
 
 __all__ = ["cli"]
 
-_OUTPUT_FORMATS = ("markdown", "pyspark")
+_OUTPUT_FORMATS = ("markdown", "pyspark", "json-schema")
 
 _FEATURE_FRONTMATTER = "---\nsidebar_position: 1\n---\n\n"
 
@@ -117,6 +118,8 @@ def generate(
 
     if output_format == "pyspark":
         _generate_pyspark(model_specs, output_dir, test_output_dir)
+    elif output_format == "json-schema":
+        _generate_json_schema(model_specs, output_dir)
     else:
         # RootModel entry points yield no ModelSpec, so they document as
         # named aliases -- reachable no other way, since a RootModel field
@@ -170,6 +173,16 @@ def _generate_pyspark(
     if test_output_dir is not None:
         for mod in modules.test:
             _write_output(mod.content, test_output_dir, mod.path)
+
+
+def _generate_json_schema(
+    model_specs: list[ModelSpec],
+    output_dir: Path | None,
+) -> None:
+    """Generate JSON Schema documents, one per model spec."""
+    documents = generate_json_schema_documents(model_specs)
+    for doc in documents:
+        _write_output(doc.content, output_dir, doc.path)
 
 
 def _ancestor_dirs(paths: set[PurePosixPath]) -> set[PurePosixPath]:
