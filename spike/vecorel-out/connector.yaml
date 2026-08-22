@@ -1,0 +1,142 @@
+$schema: https://vecorel.org/sdl/v0.2.0/schema.json
+required:
+- id
+- geometry
+- theme
+- type
+- version
+properties:
+  id:
+    type: string
+    minLength: 1
+    pattern: ^\S+$
+    description: "A feature ID. This may be an ID associated with the Global Entity\
+      \ Reference System (GERS) if\u2014and-only-if the feature represents an entity\
+      \ that is part of GERS."
+  bbox:
+    type: bounding-box
+    description: An optional bounding box for the feature
+  geometry:
+    type: geometry
+    geometryTypes:
+    - Point
+    description: Position of the connector
+  theme:
+    type: string
+    enum:
+    - transportation
+  type:
+    type: string
+    enum:
+    - connector
+  version:
+    type: int32
+    minimum: -2147483648
+    maximum: 2147483647
+  sources:
+    type: array
+    items:
+      type: object
+      properties:
+        property:
+          type: string
+          description: 'A JSON Pointer identifying the property (field) that this
+            source information applies to.
+
+
+            The root document value `""` indicates that this source information applies
+            to the
+
+            entire feature, excepting properties (fields) for which a dedicated source
+            information
+
+            record exists.
+
+
+            Any other JSON Pointer apart from `""` indicates that this source record
+            provides
+
+            dedicated source information for the property at the path in the JSON
+            Pointer. As an
+
+            example, the value `"/names/common/en"` indicates that the source information
+            applies to
+
+            the English common name of a named feature, while the value `"/geometry"`
+            indicates that
+
+            it applies to the feature geometry.'
+        dataset:
+          type: string
+          description: Name of the dataset where the source data can be found.
+        license:
+          type: string
+          pattern: ^(\S(.*\S)?)?\Z
+          description: 'Source data license name.
+
+
+            This should be a valid SPDX license identifier when available.
+
+
+            If omitted, contact the data provider for more license information.'
+        record_id:
+          type: string
+          description: 'Identifies the specific record within the source dataset where
+            the source data can
+
+            be found.
+
+
+            The format of record identifiers is dataset-specific.'
+        update_time:
+          type: date-time
+          description: Last update time of the source data record.
+        confidence:
+          type: double
+          minimum: 0.0
+          maximum: 1.0
+          description: 'Confidence value from the source dataset.
+
+
+            This is a value between 0.0 and 1.0 and is particularly relevant for ML-derived
+            data.'
+        provider:
+          type: string
+          minLength: 1
+          pattern: ^[a-z0-9]+(_[a-z0-9]+)*$
+          description: 'The provider label for the entity that contributed this data
+
+            (e.g., osm, meta, esri).'
+        resource:
+          type: string
+          minLength: 1
+          pattern: ^[a-z0-9]+(_[a-z0-9]+)*$
+          description: 'The subject or type of data contributed by the provider
+
+            (e.g., planet, buildings, division_names).'
+        version:
+          type: string
+          minLength: 1
+          pattern: ^\S+$
+          description: 'A sortable identifier for the specific snapshot of the resource
+
+            (e.g., 2026-02-13, 5.3, A5692).'
+        between:
+          type: array
+          items:
+            type: double
+            minimum: 0.0
+            maximum: 1.0
+          minItems: 2
+          maxItems: 2
+          description: The linearly-referenced sub-segment of the geometry, specified
+            as a range (pair) of percentage displacements from the start of the geometry,
+            that the containing SourceItem applies to.
+      required:
+      - property
+      description: Specifies the source of the data used for a feature or one of its
+        properties.
+      additionalProperties: false
+    minItems: 1
+    uniqueItems: true
+    description: Information about the source data used to assemble the feature.

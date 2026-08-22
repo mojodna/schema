@@ -1,0 +1,263 @@
+$schema: https://vecorel.org/sdl/v0.2.0/schema.json
+required:
+- id
+- geometry
+- theme
+- type
+- version
+- country
+properties:
+  id:
+    type: string
+    minLength: 1
+    pattern: ^\S+$
+    description: "A feature ID. This may be an ID associated with the Global Entity\
+      \ Reference System (GERS) if\u2014and-only-if the feature represents an entity\
+      \ that is part of GERS."
+  bbox:
+    type: bounding-box
+    description: An optional bounding box for the feature
+  geometry:
+    type: geometry
+    geometryTypes:
+    - Point
+    description: Position of the address. Addresses are point geometries.
+  theme:
+    type: string
+    enum:
+    - addresses
+  type:
+    type: string
+    enum:
+    - address
+  version:
+    type: int32
+    minimum: -2147483648
+    maximum: 2147483647
+  sources:
+    type: array
+    items:
+      type: object
+      properties:
+        property:
+          type: string
+          description: 'A JSON Pointer identifying the property (field) that this
+            source information applies to.
+
+
+            The root document value `""` indicates that this source information applies
+            to the
+
+            entire feature, excepting properties (fields) for which a dedicated source
+            information
+
+            record exists.
+
+
+            Any other JSON Pointer apart from `""` indicates that this source record
+            provides
+
+            dedicated source information for the property at the path in the JSON
+            Pointer. As an
+
+            example, the value `"/names/common/en"` indicates that the source information
+            applies to
+
+            the English common name of a named feature, while the value `"/geometry"`
+            indicates that
+
+            it applies to the feature geometry.'
+        dataset:
+          type: string
+          description: Name of the dataset where the source data can be found.
+        license:
+          type: string
+          pattern: ^(\S(.*\S)?)?\Z
+          description: 'Source data license name.
+
+
+            This should be a valid SPDX license identifier when available.
+
+
+            If omitted, contact the data provider for more license information.'
+        record_id:
+          type: string
+          description: 'Identifies the specific record within the source dataset where
+            the source data can
+
+            be found.
+
+
+            The format of record identifiers is dataset-specific.'
+        update_time:
+          type: date-time
+          description: Last update time of the source data record.
+        confidence:
+          type: double
+          minimum: 0.0
+          maximum: 1.0
+          description: 'Confidence value from the source dataset.
+
+
+            This is a value between 0.0 and 1.0 and is particularly relevant for ML-derived
+            data.'
+        provider:
+          type: string
+          minLength: 1
+          pattern: ^[a-z0-9]+(_[a-z0-9]+)*$
+          description: 'The provider label for the entity that contributed this data
+
+            (e.g., osm, meta, esri).'
+        resource:
+          type: string
+          minLength: 1
+          pattern: ^[a-z0-9]+(_[a-z0-9]+)*$
+          description: 'The subject or type of data contributed by the provider
+
+            (e.g., planet, buildings, division_names).'
+        version:
+          type: string
+          minLength: 1
+          pattern: ^\S+$
+          description: 'A sortable identifier for the specific snapshot of the resource
+
+            (e.g., 2026-02-13, 5.3, A5692).'
+        between:
+          type: array
+          items:
+            type: double
+            minimum: 0.0
+            maximum: 1.0
+          minItems: 2
+          maxItems: 2
+          description: The linearly-referenced sub-segment of the geometry, specified
+            as a range (pair) of percentage displacements from the start of the geometry,
+            that the containing SourceItem applies to.
+      required:
+      - property
+      description: Specifies the source of the data used for a feature or one of its
+        properties.
+      additionalProperties: false
+    minItems: 1
+    uniqueItems: true
+    description: Information about the source data used to assemble the feature.
+  address_levels:
+    type: array
+    items:
+      type: object
+      properties:
+        value:
+          type: string
+          minLength: 1
+          pattern: ^(\S(.*\S)?)?\Z
+          description: A string without leading or trailing whitespace
+      description: "A sub-country addressing unit, such as a region, city, or neighborhood,\
+        \ that is less specific\nthan a street name and not a postal code.\n\nIn the\
+        \ following address, the terms `Montr\xE9al` and `QC` are address levels:\n\
+        \n```\n3998 Rue De Bullion, Montr\xE9al, QC H2W 2E4\n```\n\nThe number of\
+        \ address levels per address is country-dependent.\n\nOther addressing systems\
+        \ may use the terms \"administrative level\" or \"admin level\"  for the\n\
+        same concept. We have chosen the term \"address level\" to communicate the\
+        \ fact that in some\ncountries and regions, address levels do not necessarily\
+        \ correspond to administrative units."
+      additionalProperties: false
+    minItems: 1
+    maxItems: 5
+    description: 'Names of the sub-country addressing areas the address belongs to,
+      including the city
+
+      or locality, in descending order of generality.
+
+
+      The list is sorted so that the highest, or most general, level comes first (*e.g.*,
+
+      region) and the lowest, or most particular level, comes last (*e.g.*, city or
+      town).
+
+
+      The number of items in this list and their meaning is country-dependent. For
+
+      example, in the United States, we expect two items: the state, and the locality
+      or
+
+      municipality within the state. Other countries might have as few as one, or
+      even
+
+      three or more.
+
+
+      When a specific level that is required for a country is not known. most likely
+
+      because the data provider has not supplied it and we have not derived it from
+
+      another source, the list item corresponding to that level must be present, but
+      its
+
+      `value` field should be omitted.'
+  country:
+    type: string
+    pattern: ^[A-Z]{2}$
+    minLength: 2
+    maxLength: 2
+    description: The country the address belongs to, as an ISO 3166-1 alpha-2 country
+      code.
+  number:
+    type: string
+    minLength: 1
+    pattern: ^(\S(.*\S)?)?\Z
+    description: 'The house number.
+
+
+      This field does not necessarily contain an integer or even a number. Values
+      such as
+
+      "74B", "189 1/2", and "208.5", where the non-integer or non-number part is part
+      of
+
+      the house number, not a unit number, are in common use.'
+  postal_city:
+    type: string
+    minLength: 1
+    pattern: ^(\S(.*\S)?)?\Z
+    description: "The postal authority designated city name, if applicable.\n\nIn\
+      \ some countries or regions, a mailing address may need to specify a different\
+      \ city\nname than the city that actually contains the address coordinates. This\
+      \ optional\nfield can be used to specify the alternate city name to use.\n\n\
+      For example:\n\n- The postal city for the US address *716 East County Road,\
+      \ Winchester, Indiana*\n  is Ridgeville.\n- The postal city for the Slovenian\
+      \ address *Tomaj 71, 6221 Tomaj, Slovenia* is\n  Dutovlje."
+  postcode:
+    type: string
+    minLength: 1
+    pattern: ^(\S(.*\S)?)?\Z
+    description: The postal code.
+  street:
+    type: string
+    minLength: 1
+    pattern: ^(\S(.*\S)?)?\Z
+    description: 'The street name.
+
+
+      The street name can include a type (*e.g.*, "Street" or "St", "Boulevard" or
+      "Blvd",
+
+      *etc.*) and a directional (*e.g.*, "NW" or "Northwest", "S" or "Sud"). Both
+      type and
+
+      directional, if present, may be either a prefix or a suffix to the primary name.
+
+      They may either be fully spelled-out or abbreviated.'
+  unit:
+    type: string
+    minLength: 1
+    pattern: ^(\S(.*\S)?)?\Z
+    description: 'The secondary address unit designator.
+
+
+      In the case where the primary street address is divided into secondary units,
+      which
+
+      may be apartments, floors, or even buildings if the primary street address is
+      a
+
+      campus, this field names the specific secondary unit being addressed.'
